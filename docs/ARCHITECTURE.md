@@ -1,0 +1,107 @@
+# HerdLab: architecture
+
+Planned design from spec v0.1. No code exists yet; update this file when implementation diverges.
+
+## Data flow
+
+```
+Market data & feature engine (real returns, vol, volume, order flow)
+        |  calibrates exogenous processes
+        v
+Agents (factor, ML, temporal)  <-->  Multi-agent market simulator
+                                     (execution, impact, liquidity, risk limits, forced liquidation)
+                                        |                         |
+                               Private ground truth        Public observations
+                               (positions, orders,         (prices, volume, imbalance,
+                                leverage, crowding)          volatility)
+                                        |                         |
+                                        +--> labels only    Inverse observer model
+                                                                  |
+                                                             Evaluation
+```
+
+The observer code path must never be able to import or receive private state. Labels flow to training as targets only.
+
+## Agents
+
+Default population of 30 (experimental defaults, not claims about real fund composition):
+
+| Family | Count | Strategy |
+| --- | --- | --- |
+| Momentum | 6 | Follow recent returns/trends |
+| Mean reversion | 6 | Trade against short-term deviations |
+| Linear ML | 6 | Ridge/logistic return forecast |
+| Gradient-boosted trees | 6 | LightGBM forecast |
+| Neural networks | 6 | MLP or small GRU forecast |
+
+Each agent gets common market features plus agent-specific data and parameters; overlap is varied in a controlled way.
+
+Decision model for agent i at time t:
+
+- Forecast: r̂_{i,t+1} = f_{θ_i}(X_{≤t})
+- Target exposure: q*_{i,t} = q_i^max · tanh( r̂_{i,t+1} / (k_i σ̂_t + ε) )
+- Order: u_{i,t} = clip( q*_{i,t} − q_{i,t}, −u_i^max, u_i^max )
+
+Optional constraints: position limits, execution costs, delay, max participation in volume.
+
+Risk management is required. On breaching a drawdown or margin threshold, an agent must reduce exposure, possibly over several periods. Without this, synchronized forced selling cannot appear.
+
+## Market simulator
+
+Phase A (first): aggregate price impact.
+
+- Q_t = Σ_i u_{i,t} + Q_t^background
+- r_{t+1} = r_{t+1}^exo + λ_t · g(Q_t / D_t)
+- r^exo: exogenous shocks; D_t: available liquidity; λ_t: impact sensitivity; g: linear first, possibly concave later.
+
+Agents observe resulting prices and update, giving the feedback loop price decline → risk constraints → synchronized selling → more impact. This loop is possible, not guaranteed; the simulation decides.
+
+Phase B (later): full limit order book with market makers, cancellations, queues, latency, depth. ABIDES / ABIDES-MARL as references.
+
+## Observer inputs and targets
+
+Public features at t: lagged returns r_t..r_{t−k}, σ̂_t, volume V_t, order-flow imbalance OFI_t, liquidity proxies. OFI is computed only from observable past executed trades, never from agents' intended orders.
+
+Hidden labels from ground truth:
+
+- Position alignment: C^pos_t = |Σ_i q_{i,t}| / (Σ_i |q_{i,t}| + ε)
+- Flow synchronization: C^flow_t = |Σ_i u_{i,t}| / (Σ_i |u_{i,t}| + ε)
+- Also rolling correlations and concentration of risk exposure.
+
+These measure different things: similar positions without simultaneous trading, or same-direction trading from different positions.
+
+Tasks:
+
+| Task | Predicts | Difficulty |
+| --- | --- | --- |
+| A. State inference | Current C^pos_t | Medium (diagnostic) |
+| B. Flow forecasting | Next h-period net agent buying/selling | Hard |
+| C. Unwind forecasting | P(Y_{t,h}=1 \| X_{≤t}), large endogenous sell episode within h | Hardest (headline) |
+
+Y_{t,h}=1 when a subsequent h-window has unusually large agent-originated net selling relative to liquidity. Threshold set from training data only. Future price declines reported as a separate outcome.
+
+Models: logistic/linear baseline, LightGBM, GRU/temporal CNN; latent-state probabilistic sequence model only after baselines show signal.
+
+## Real data
+
+Start with Binance BTC/USDT then ETH/USDT spot (trades, aggTrades, klines), 1-minute bars, 6–12 months for calibration. Spot timestamps from January 2025 onward are in microseconds; ingestion must handle both units. LOBSTER samples later for order-book feature validation.
+
+## Repository layout (planned)
+
+```
+herdlab/
+  configs/      baseline.yaml, stress_test.yaml, generalization.yaml
+  data/         ingest.py, features.py
+  agents/       base.py, factor.py, learned.py, risk.py
+  market/       simulator.py, impact.py, execution.py
+  inference/    observer.py, targets.py, baselines.py
+  experiments/  emergence.py, identification.py, generalization.py, stress.py
+  evaluation/   metrics.py, plotting.py
+tests/
+```
+
+## Technology
+
+Python + NumPy/Polars (simulator deterministic given a seed), PyTorch, LightGBM, DuckDB + Parquet, Hydra or YAML configs, pytest, Streamlit/Plotly once experiments work. Single language; move the event loop to C++/Rust only if profiling justifies it.
+
+Tests must cover position accounting, cash conservation under execution, timestamps, risk rules, and public/private data separation.
