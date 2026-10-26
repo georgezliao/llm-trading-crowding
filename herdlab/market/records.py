@@ -187,6 +187,12 @@ def public_field_names() -> tuple[str, ...]:
     return tuple(field.name for field in fields(PublicRecord))
 
 
+def private_field_names() -> tuple[str, ...]:
+    """Return the complete serialized private ground-truth schema."""
+
+    return tuple(field.name for field in fields(PrivateRecord))
+
+
 def _validate_float_arrays(
     arrays: tuple[FloatArray, ...], *, ndim: int, label: str
 ) -> None:
@@ -208,6 +214,7 @@ def _realized_volatility(returns: FloatArray, lookback: int) -> float:
 __all__ = [
     "PrivateRecord",
     "PublicRecord",
+    "private_field_names",
     "public_field_names",
     "split_simulation_records",
 ]
