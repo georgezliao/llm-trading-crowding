@@ -3,3 +3,9 @@ data/raw/
 __pycache__/
 *.egg-info/
 .venv/
+
+# Keep generated reports ignored by default, but retain the required step-15
+# smoke-test output even when a developer's .git/info/exclude ignores the dir.
+!docs/reports/
+docs/reports/*
+!docs/reports/experiment_zero_smoke.md
