@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Drives Codex through PLAN.md one unchecked step at a time.
 # After each Codex run this acts as the lifecycle hook: it runs pytest, halts on
-# failure or on no progress, otherwise commits and moves to the next step.
+# failure or on no progress, otherwise commits, pushes and moves to the next step.
 # Usage: scripts/codex_loop.sh [max_runs]   (default 15)
 set -uo pipefail
 
@@ -49,6 +49,10 @@ Do NOT run git commit; the driver commits after its own test run. Do not touch l
 
   git add -A
   git commit -q -m "$(echo "$STEP" | sed -E 's/^- \[ \] //' | cut -c1-72)" || true
+  # Push each step so GitHub tracks progress; a failed push is logged, not fatal.
+  if ! git push -q -u origin HEAD >>"$LOG_DIR/push.log" 2>&1; then
+    echo "WARN: push failed after run $i; see $LOG_DIR/push.log" | tee -a "$STATUS"
+  fi
   echo "INSTRUCTION: Proceed to the next unchecked step. ($(remaining) remaining)" | tee -a "$STATUS"
 done
 
