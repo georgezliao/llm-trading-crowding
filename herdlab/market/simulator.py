@@ -27,6 +27,7 @@ from herdlab.agents.base import Agent, PublicObservation
 from herdlab.agents.risk import RiskLimits, RiskManager
 from herdlab.market.exogenous import ExogenousPath
 from herdlab.market.impact import ImpactFunction, LinearImpact, SignedPowerImpact
+from herdlab.market.records import PrivateRecord, PublicRecord, split_simulation_records
 
 
 FloatArray = NDArray[np.float64]
@@ -188,6 +189,18 @@ class MarketSimulator:
             leverage=leverage,
         )
 
+    def run_records(
+        self, exogenous: ExogenousPath
+    ) -> tuple[PublicRecord, PrivateRecord]:
+        """Execute an episode and return its separated public/private outputs."""
+
+        result = self.run(exogenous)
+        return split_simulation_records(
+            result,
+            exogenous,
+            realized_volatility_lookback=self.volatility_lookback,
+        )
+
 
 def simulate_market(
     config: Mapping[str, Any],
@@ -201,6 +214,20 @@ def simulate_market(
     return MarketSimulator(
         config, agents, impact_function=impact_function
     ).run(exogenous)
+
+
+def simulate_market_records(
+    config: Mapping[str, Any],
+    agents: Sequence[Agent],
+    exogenous: ExogenousPath,
+    *,
+    impact_function: ImpactFunction | None = None,
+) -> tuple[PublicRecord, PrivateRecord]:
+    """Run one episode and return only the explicitly separated records."""
+
+    return MarketSimulator(
+        config, agents, impact_function=impact_function
+    ).run_records(exogenous)
 
 
 def _accounting_config(config: Mapping[str, Any]) -> tuple[float, float, float]:
@@ -264,4 +291,9 @@ def _leverage_vector(
     )
 
 
-__all__ = ["MarketSimulator", "SimulationResult", "simulate_market"]
+__all__ = [
+    "MarketSimulator",
+    "SimulationResult",
+    "simulate_market",
+    "simulate_market_records",
+]
