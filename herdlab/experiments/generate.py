@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 import json
+import multiprocessing
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -51,12 +52,16 @@ def generate_episodes(
     seed_start: int,
     out: str | Path,
     source_config: str | Path | None = None,
+    workers: int = 1,
 ) -> Path:
     """Generate consecutive seeded episodes and write a JSON manifest.
 
     Each episode has its own directory and separate ``public.npz`` and
     ``private.npz`` archives.  Paths recorded in the manifest are relative to
     the manifest directory, allowing an entire run directory to be moved.
+    Every task receives its seed explicitly, so worker scheduling cannot alter
+    an episode's random streams.  Results retain seed order in both serial and
+    parallel modes.
     """
 
     if n_episodes <= 0:
@@ -65,6 +70,8 @@ def generate_episodes(
         raise ValueError("seed_start must be nonnegative")
     if not population:
         raise ValueError("population must be nonempty")
+    if isinstance(workers, bool) or workers <= 0:
+        raise ValueError("workers must be positive")
 
     runs_root = (Path.cwd() / "runs").resolve()
     output_dir = Path(out).resolve()
@@ -72,19 +79,15 @@ def generate_episodes(
         raise ValueError("--out must resolve to a directory under runs/")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    entries: list[dict[str, Any]] = []
-    for index, seed in enumerate(range(seed_start, seed_start + n_episodes)):
-        episode_dir = output_dir / f"episode_{index:04d}_seed_{seed}"
-        public, private = run_episode(config, seed)
-        public_path, private_path = write_episode(public, private, episode_dir)
-        entries.append(
-            {
-                "episode": index,
-                "seed": seed,
-                "public": str(public_path.relative_to(output_dir)),
-                "private": str(private_path.relative_to(output_dir)),
-            }
-        )
+    tasks = [
+        (dict(config), index, seed, output_dir)
+        for index, seed in enumerate(range(seed_start, seed_start + n_episodes))
+    ]
+    if workers == 1:
+        entries = [_generate_episode(task) for task in tasks]
+    else:
+        with multiprocessing.Pool(processes=workers) as pool:
+            entries = pool.map(_generate_episode, tasks)
 
     manifest: dict[str, Any] = {
         "format_version": 1,
@@ -101,6 +104,23 @@ def generate_episodes(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return manifest_path
+
+
+def _generate_episode(
+    task: tuple[dict[str, Any], int, int, Path],
+) -> dict[str, Any]:
+    """Run and serialize one independently seeded multiprocessing task."""
+
+    config, index, seed, output_dir = task
+    episode_dir = output_dir / f"episode_{index:04d}_seed_{seed}"
+    public, private = run_episode(config, seed)
+    public_path, private_path = write_episode(public, private, episode_dir)
+    return {
+        "episode": index,
+        "seed": seed,
+        "public": str(public_path.relative_to(output_dir)),
+        "private": str(private_path.relative_to(output_dir)),
+    }
 
 
 def _deep_merge(
@@ -135,6 +155,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--out", required=True, help="output directory beneath runs/"
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="number of episode worker processes (default: 1)",
+    )
     args = parser.parse_args(argv)
 
     config = load_population_config(args.config, args.population)
@@ -145,6 +171,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         seed_start=args.seed_start,
         out=args.out,
         source_config=args.config,
+        workers=args.workers,
     )
 
 

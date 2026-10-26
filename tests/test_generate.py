@@ -15,7 +15,11 @@ from herdlab.agents.learned import (
     MLPAgent,
     build_population,
 )
-from herdlab.experiments.generate import load_population_config, main
+from herdlab.experiments.generate import (
+    generate_episodes,
+    load_population_config,
+    main,
+)
 from herdlab.inference.observer_data import load_public_record
 from herdlab.market.records import private_field_names
 
@@ -109,6 +113,8 @@ def test_cli_writes_correct_manifest_and_small_batch(tmp_path, monkeypatch) -> N
             "41",
             "--out",
             "runs/batch",
+            "--workers",
+            "2",
         ]
     )
 
@@ -141,3 +147,55 @@ def test_cli_writes_correct_manifest_and_small_batch(tmp_path, monkeypatch) -> N
         load_public_record(manifest_path.parent / entry["public"])
         with np.load(manifest_path.parent / entry["private"], allow_pickle=False) as archive:
             assert set(archive.files) == set(private_field_names())
+
+
+def test_parallel_generation_matches_serial_for_same_three_seeds(
+    tmp_path, monkeypatch
+) -> None:
+    config = yaml.safe_load(
+        (PROJECT_ROOT / "configs" / "baseline.yaml").read_text(encoding="utf-8")
+    )
+    config["simulation"]["n_steps"] = 8
+    config["agents"]["population_size"] = 2
+    for family in ("linear", "gbdt", "mlp"):
+        config["agents"][family]["count"] = 0
+    config["agents"]["momentum"]["count"] = 1
+    config["agents"]["reversion"]["count"] = 1
+
+    monkeypatch.chdir(tmp_path)
+    serial_manifest_path = generate_episodes(
+        config,
+        population="tiny",
+        n_episodes=3,
+        seed_start=71,
+        out="runs/serial",
+        workers=1,
+    )
+    parallel_manifest_path = generate_episodes(
+        config,
+        population="tiny",
+        n_episodes=3,
+        seed_start=71,
+        out="runs/parallel",
+        workers=2,
+    )
+
+    serial_manifest = json.loads(serial_manifest_path.read_text(encoding="utf-8"))
+    parallel_manifest = json.loads(parallel_manifest_path.read_text(encoding="utf-8"))
+    assert serial_manifest == parallel_manifest
+
+    for entry in serial_manifest["episodes"]:
+        for record_name in ("public", "private"):
+            with (
+                np.load(
+                    serial_manifest_path.parent / entry[record_name],
+                    allow_pickle=False,
+                ) as serial,
+                np.load(
+                    parallel_manifest_path.parent / entry[record_name],
+                    allow_pickle=False,
+                ) as parallel,
+            ):
+                assert serial.files == parallel.files
+                for field in serial.files:
+                    np.testing.assert_array_equal(serial[field], parallel[field])
