@@ -15,6 +15,7 @@ def _limits(**overrides: float | int) -> RiskLimits:
         "max_drawdown": 0.10,
         "max_leverage": 2.0,
         "liquidation_steps": 4,
+        "cooldown_steps": 2,
     }
     values.update(overrides)
     return RiskLimits(**values)  # type: ignore[arg-type]
@@ -68,9 +69,9 @@ def test_forced_reduction_works_for_a_short_position() -> None:
     assert position == pytest.approx(0.0)
 
 
-def test_liquidation_schedule_finishes_after_leverage_returns_within_limit() -> None:
+def test_liquidation_cooldown_then_resume_resets_peak_equity() -> None:
     manager = RiskManager(
-        _limits(max_leverage=1.0, liquidation_steps=2),
+        _limits(max_leverage=1.0, liquidation_steps=2, cooldown_steps=2),
         initial_peak_equity=100.0,
     )
 
@@ -83,15 +84,65 @@ def test_liquidation_schedule_finishes_after_leverage_returns_within_limit() -> 
         price=50.0,
         equity=100.0,
     )
+    cooldown = [
+        manager.apply(
+            strategy_order=0.75, position=0.0, price=50.0, equity=85.0
+        ),
+        manager.apply(
+            strategy_order=0.75, position=0.0, price=50.0, equity=82.0
+        ),
+    ]
     resumed = manager.apply(
-        strategy_order=0.75, position=0.0, price=50.0, equity=100.0
+        strategy_order=0.75, position=0.0, price=50.0, equity=82.0
     )
 
     assert first == pytest.approx(first)  # exercise immutable value return
     assert first.forced and first.quantity == pytest.approx(-1.5)
     assert second.forced and second.quantity == pytest.approx(-1.5)
+    assert [decision.quantity for decision in cooldown] == [0.0, 0.0]
+    assert all(decision.forced is False for decision in cooldown)
     assert resumed.forced is False
     assert resumed.quantity == 0.75
+    assert manager.peak_equity == 82.0
+
+
+def test_agent_can_breach_recover_and_breach_again_in_one_episode() -> None:
+    manager = RiskManager(
+        _limits(liquidation_steps=1, cooldown_steps=1),
+        initial_peak_equity=100.0,
+    )
+
+    first_breach = manager.apply(
+        strategy_order=1.0, position=2.0, price=10.0, equity=89.0
+    )
+    cooldown = manager.apply(
+        strategy_order=1.0, position=0.0, price=10.0, equity=89.0
+    )
+    resumed = manager.apply(
+        strategy_order=1.0, position=0.0, price=10.0, equity=90.0
+    )
+    second_breach = manager.apply(
+        strategy_order=1.0, position=1.0, price=10.0, equity=80.0
+    )
+
+    assert first_breach.forced is True
+    assert cooldown.quantity == 0.0 and cooldown.forced is False
+    assert resumed.quantity == 1.0 and resumed.forced is False
+    assert manager.peak_equity == 90.0
+    assert second_breach.quantity == -1.0 and second_breach.forced is True
+
+
+def test_zero_quantity_risk_order_is_not_marked_forced() -> None:
+    manager = RiskManager(
+        _limits(liquidation_steps=1), initial_peak_equity=100.0
+    )
+
+    decision = manager.apply(
+        strategy_order=2.0, position=0.0, price=10.0, equity=89.0
+    )
+
+    assert decision.quantity == 0.0
+    assert decision.forced is False
 
 
 def test_limits_load_from_full_baseline_config() -> None:
@@ -102,5 +153,8 @@ def test_limits_load_from_full_baseline_config() -> None:
     limits = RiskLimits.from_config(copied)
 
     assert limits == RiskLimits(
-        max_drawdown=0.20, max_leverage=2.0, liquidation_steps=5
+        max_drawdown=0.20,
+        max_leverage=2.0,
+        liquidation_steps=5,
+        cooldown_steps=20,
     )

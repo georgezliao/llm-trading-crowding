@@ -73,6 +73,7 @@ agents:
     max_drawdown: 0.20
     max_leverage: 2.0
     liquidation_steps: 5
+    cooldown_steps: 20
 
 market:
   impact_model: linear

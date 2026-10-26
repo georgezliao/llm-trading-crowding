@@ -44,7 +44,7 @@ Decision model for agent i at time t:
 
 Optional constraints: position limits, execution costs, delay, max participation in volume.
 
-Risk management is required. On breaching a drawdown or margin threshold, an agent must reduce exposure, possibly over several periods. Without this, synchronized forced selling cannot appear.
+Risk management is required. On breaching a drawdown or margin threshold, an agent reduces exposure to zero over `liquidation_steps` decisions. The completed schedule is followed by `cooldown_steps` decisions with zero target exposure; strategy orders resume after the cooldown and the drawdown peak resets to current equity at that point. A risk-overridden order is marked forced only when its quantity is nonzero. Without forced reduction, synchronized forced selling cannot appear.
 
 ## Market simulator
 

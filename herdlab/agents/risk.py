@@ -15,6 +15,7 @@ class RiskLimits:
     max_drawdown: float
     max_leverage: float
     liquidation_steps: int
+    cooldown_steps: int = 20
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.max_drawdown) or not 0.0 <= self.max_drawdown < 1.0:
@@ -27,6 +28,12 @@ class RiskLimits:
             raise ValueError("liquidation_steps must be an integer")
         if self.liquidation_steps <= 0:
             raise ValueError("liquidation_steps must be positive")
+        if isinstance(self.cooldown_steps, (bool, np.bool_)) or not isinstance(
+            self.cooldown_steps, (int, np.integer)
+        ):
+            raise ValueError("cooldown_steps must be an integer")
+        if self.cooldown_steps < 0:
+            raise ValueError("cooldown_steps must be nonnegative")
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> RiskLimits:
@@ -38,6 +45,7 @@ class RiskLimits:
             max_drawdown=float(risk["max_drawdown"]),
             max_leverage=float(risk["max_leverage"]),
             liquidation_steps=int(risk["liquidation_steps"]),
+            cooldown_steps=int(risk.get("cooldown_steps", 20)),
         )
 
 
@@ -57,8 +65,9 @@ class RiskManager:
     equity).  On a breach, the current exposure is divided over the remaining
     liquidation decisions so that, if fills match orders, it reaches zero on
     the configured final decision.  A liquidation already under way completes
-    even if leverage falls below its limit; a persistent drawdown continues to
-    suppress strategy orders after exposure reaches zero.
+    even if leverage falls below its limit.  It is followed by a configured
+    cooldown targeting zero exposure; when strategy trading resumes, peak
+    equity is reset to the then-current equity.
 
     This object contains private agent state and must not be passed to observer
     code.
@@ -75,6 +84,8 @@ class RiskManager:
             self._peak_equity = None
         self.limits = limits
         self._liquidation_steps_remaining = 0
+        self._cooldown_steps_remaining = 0
+        self._reset_peak_on_resume = False
 
     @property
     def peak_equity(self) -> float | None:
@@ -87,6 +98,12 @@ class RiskManager:
         """Number of forced reduction decisions left in the active schedule."""
 
         return self._liquidation_steps_remaining
+
+    @property
+    def cooldown_steps_remaining(self) -> int:
+        """Number of zero-exposure decisions left in the cooldown."""
+
+        return self._cooldown_steps_remaining
 
     def drawdown(self, equity: float) -> float:
         """Update peak equity and return current fractional drawdown."""
@@ -126,6 +143,24 @@ class RiskManager:
 
         _require_finite("strategy_order", strategy_order)
         _require_finite("position", position)
+
+        if self._cooldown_steps_remaining > 0:
+            _require_finite("price", price)
+            _require_finite("equity", equity)
+            if price <= 0.0:
+                raise ValueError("price must be positive")
+            quantity = -float(position)
+            self._cooldown_steps_remaining -= 1
+            if self._cooldown_steps_remaining == 0:
+                self._reset_peak_on_resume = True
+            return OrderDecision(quantity=quantity, forced=quantity != 0.0)
+
+        if self._reset_peak_on_resume:
+            _require_finite("equity", equity)
+            if equity > 0.0:
+                self._peak_equity = float(equity)
+            self._reset_peak_on_resume = False
+
         current_drawdown = self.drawdown(equity)
         current_leverage = self.leverage(
             position=position, price=price, equity=equity
@@ -143,7 +178,10 @@ class RiskManager:
             quantity = -float(position) / remaining
             if self._liquidation_steps_remaining > 0:
                 self._liquidation_steps_remaining -= 1
-            return OrderDecision(quantity=quantity, forced=True)
+                if self._liquidation_steps_remaining == 0:
+                    self._cooldown_steps_remaining = self.limits.cooldown_steps
+                    self._reset_peak_on_resume = self.limits.cooldown_steps == 0
+            return OrderDecision(quantity=quantity, forced=quantity != 0.0)
 
         return OrderDecision(quantity=float(strategy_order), forced=False)
 
