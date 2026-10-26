@@ -65,8 +65,8 @@ Public features at t: lagged returns r_t..r_{t−k}, σ̂_t, volume V_t, order-f
 
 Hidden labels from ground truth:
 
-- Position alignment: C^pos_t = |Σ_i q_{i,t}| / (Σ_i |q_{i,t}| + ε)
-- Flow synchronization: C^flow_t = |Σ_i u_{i,t}| / (Σ_i |u_{i,t}| + ε)
+- Position alignment: C^pos_t = |Σ_i q_{i,t}| / Σ_i |q_{i,t}|, defined as 0 when all positions are zero.
+- Flow synchronization: C^flow_t = |Σ_i u_{i,t}| / Σ_i |u_{i,t}|, defined as 0 when all orders are zero.
 - Also rolling correlations and concentration of risk exposure.
 
 These measure different things: similar positions without simultaneous trading, or same-direction trading from different positions.
@@ -79,7 +79,7 @@ Tasks:
 | B. Flow forecasting | Next h-period net agent buying/selling | Hard |
 | C. Unwind forecasting | P(Y_{t,h}=1 \| X_{≤t}), large endogenous sell episode within h | Hardest (headline) |
 
-Y_{t,h}=1 when a subsequent h-window has unusually large agent-originated net selling relative to liquidity. Threshold set from training data only. Future price declines reported as a separate outcome.
+Y_{t,h}=1 when `max(0, -Σ_{s=t+1}^{t+h} agent_flow_s) / Σ_{s=t+1}^{t+h} D_s` exceeds a fixed threshold. Only complete, strictly future windows are labeled. The threshold is a specified empirical quantile of these scores pooled from training episodes only (95th percentile by default); validation/test episodes never enter the fit. Future price declines are reported as a separate outcome.
 
 Models: logistic/linear baseline, LightGBM, GRU/temporal CNN; latent-state probabilistic sequence model only after baselines show signal.
 

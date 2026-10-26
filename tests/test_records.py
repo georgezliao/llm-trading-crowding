@@ -57,6 +57,8 @@ def test_public_record_schema_has_no_agent_only_fields() -> None:
     )
     np.testing.assert_allclose(public.executed_imbalance, [7.0, -6.0])
     np.testing.assert_allclose(private.agent_net_flow, [3.0, -3.0])
+    np.testing.assert_allclose(private.position_crowding, [0.0, 1.0, 0.0])
+    np.testing.assert_allclose(private.flow_crowding, [1.0, 1.0])
     assert not np.array_equal(public.executed_imbalance, private.agent_net_flow)
 
 

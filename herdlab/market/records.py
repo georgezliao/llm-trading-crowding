@@ -70,6 +70,8 @@ class PrivateRecord:
     leverage: FloatArray
     transaction_costs: FloatArray
     agent_net_flow: FloatArray
+    position_crowding: FloatArray
+    flow_crowding: FloatArray
 
     def __post_init__(self) -> None:
         state_arrays = (self.positions, self.cash, self.equity)
@@ -105,6 +107,16 @@ class PrivateRecord:
             raise ValueError("agent_net_flow must be finite")
         if not np.allclose(self.agent_net_flow, self.orders.sum(axis=1)):
             raise ValueError("agent_net_flow must equal the sum of per-agent orders")
+        if np.asarray(self.position_crowding).shape != (n_steps + 1,):
+            raise ValueError("position_crowding must have shape (steps + 1,)")
+        if np.asarray(self.flow_crowding).shape != (n_steps,):
+            raise ValueError("flow_crowding must have shape (steps,)")
+        for name, values in (
+            ("position_crowding", self.position_crowding),
+            ("flow_crowding", self.flow_crowding),
+        ):
+            if not np.all(np.isfinite(values)) or np.any(values < 0.0) or np.any(values > 1.0):
+                raise ValueError(f"{name} must be finite and in [0, 1]")
         if np.any(self.transaction_costs < 0.0):
             raise ValueError("transaction_costs must be nonnegative")
 
@@ -136,6 +148,10 @@ def split_simulation_records(
         dtype=np.float64,
     )
     agent_net_flow = np.asarray(result.orders.sum(axis=1), dtype=np.float64)
+    # Imported here to keep observer-safe record definitions independent of
+    # private inference targets at module import time.
+    from herdlab.inference.targets import flow_crowding, position_crowding
+
     executed_imbalance = agent_net_flow + np.asarray(
         exogenous.background_flow, dtype=np.float64
     )
@@ -159,6 +175,8 @@ def split_simulation_records(
         leverage=np.asarray(result.leverage, dtype=np.float64).copy(),
         transaction_costs=np.asarray(result.transaction_costs, dtype=np.float64).copy(),
         agent_net_flow=agent_net_flow.copy(),
+        position_crowding=position_crowding(result.positions),
+        flow_crowding=flow_crowding(result.orders),
     )
     return public, private
 
