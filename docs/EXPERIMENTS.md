@@ -64,3 +64,18 @@ Baseline cascade diagnostics (20 episodes), matched low/high-overlap pairs (20) 
 - Selection: the eligible cell with the lowest `impact_sensitivity`, ties broken by the lowest m. The other drawdown limits are reported as a map only.
 - If no cell is eligible, the result is reported as a null and Experiment Zero v2 does not run until the research lead revisits the model.
 - The selected setting is fixed before any observer is trained and is not revised based on observer metrics.
+
+### 2026-10-26: pre-registered impact × leverage grid, result: null
+
+Run exactly as pre-registered (450 episodes, `docs/reports/impact_leverage_grid.md`). No cell was eligible, so no setting was selected and Experiment Zero v2 did not run. At the 0.20 drawdown limit, forced flow appeared only at leverage ×20: in 2/10 episodes at impact 0.001 and 0.01, and in 10/10 at 0.03 and 0.1. The 10/10 cells failed the forced-step criterion (fractions 0.36 and 0.74 against a 0.10 cap), with median price drawdowns of 10.3% and 25.2%.
+
+Post-hoc diagnosis by the research lead: in those cells forced orders were only about 0.02–0.04% of absolute agent flow. The risk rule measures drawdown from an all-time peak that never resets, so after an agent liquidates to flat it stays breached for the rest of the episode and logs a zero-size forced order every step. The forced-step fraction therefore mostly counts locked-out agents, not forced selling. This is a model-design flaw found after seeing the results; the null above stands as recorded.
+
+### Amendment 1 (written 2026-10-26, after the null above, before rerunning)
+
+Model change, motivated by the lockout described above, not by observer metrics:
+
+- When a forced liquidation schedule completes, the agent enters a cooldown of `risk.cooldown_steps` = 20 steps with target exposure 0. At the end of the cooldown its peak equity resets to current equity and it resumes strategy trading.
+- An order is labelled forced only if its quantity is nonzero. Cooldown steps with zero orders are not forced steps.
+
+Rerun: the identical grid, seeds, episode count, eligibility rule and selection rule from the original pre-registration, under the amended model. The result is reported alongside the original null, not in place of it. If no cell is eligible, that null is final for this model version and Experiment Zero v2 does not run.
