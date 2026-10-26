@@ -11,3 +11,4 @@ docs/reports/*
 !docs/reports/experiment_zero_smoke.md
 !docs/reports/cascade_diagnostics.md
 !docs/reports/matched_crowding.md
+!docs/reports/regime_grid.md
