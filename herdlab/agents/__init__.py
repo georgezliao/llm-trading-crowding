@@ -6,10 +6,16 @@ from herdlab.agents.factor import (
     MomentumAgent,
     build_factor_population,
 )
+from herdlab.agents.learned import (
+    LinearMLAgent,
+    build_linear_population,
+    build_population,
+)
 from herdlab.agents.risk import OrderDecision, RiskLimits, RiskManager
 
 __all__ = [
     "Agent",
+    "LinearMLAgent",
     "MeanReversionAgent",
     "MomentumAgent",
     "OrderDecision",
@@ -17,4 +23,6 @@ __all__ = [
     "RiskLimits",
     "RiskManager",
     "build_factor_population",
+    "build_linear_population",
+    "build_population",
 ]

@@ -15,7 +15,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import yaml
 
-from herdlab.agents.factor import build_factor_population
+from herdlab.agents.learned import build_population
 from herdlab.market.exogenous import generate_exogenous_path
 from herdlab.market.records import PrivateRecord, PublicRecord
 from herdlab.market.simulator import simulate_market_records
@@ -28,7 +28,7 @@ def run_episode(
 
     rng = np.random.default_rng(seed)
     exogenous = generate_exogenous_path(config, rng)
-    agents = build_factor_population(config, rng)
+    agents = build_population(config, rng)
     return simulate_market_records(config, agents, exogenous)
 
 

@@ -24,8 +24,7 @@ exogenous:
     scale: 50.0
     persistence: 0.20
 
-# The initial scaffold uses factor agents only. Later plan steps add learned
-# families while retaining a total baseline population of 30 agents.
+# The population total includes the causal ridge agents configured below.
 agents:
   population_size: 30
   momentum_fraction: 0.50
@@ -36,6 +35,13 @@ agents:
   epsilon: 1.0e-8
   parameter_dispersion: 0.10
   feature_overlap: 0.50
+  linear:
+    count: 6
+    lookback: 5
+    ridge_alpha: 0.0001
+    refit_interval: 10
+    training_window: 100
+    min_samples: 20
   initial_cash: 10000.0
   transaction_cost_rate: 0.0001
   risk:
