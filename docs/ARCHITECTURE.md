@@ -52,7 +52,7 @@ Phase A (first): aggregate price impact.
 
 - Q_t = Σ_i u_{i,t} + Q_t^background
 - r_{t+1} = r_{t+1}^exo + λ_t · g(Q_t / D_t)
-- r^exo: exogenous shocks; D_t: available liquidity; λ_t: impact sensitivity; g: linear first, possibly concave later.
+- r^exo: exogenous shocks; D_t: available liquidity; λ_t: impact sensitivity; g: linear or the concave signed-power form sign(x)|x|^α with 0 < α < 1.
 
 Agents observe resulting prices and update, giving the feedback loop price decline → risk constraints → synchronized selling → more impact. This loop is possible, not guaranteed; the simulation decides.
 
