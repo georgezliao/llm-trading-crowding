@@ -9,3 +9,4 @@ __pycache__/
 !docs/reports/
 docs/reports/*
 !docs/reports/experiment_zero_smoke.md
+!docs/reports/cascade_diagnostics.md
