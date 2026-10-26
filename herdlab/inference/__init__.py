@@ -8,6 +8,7 @@ from herdlab.inference.baselines import (
 )
 from herdlab.inference.features import PublicFeatures, build_public_features
 from herdlab.inference.observer_data import load_public_record
+from herdlab.inference.temporal import GRUObserver
 
 from herdlab.inference.targets import (
     UnwindEpisode,
@@ -27,6 +28,7 @@ __all__ = [
     "UnwindEpisode",
     "LightGBMObserver",
     "LogisticObserver",
+    "GRUObserver",
     "PublicFeatures",
     "TaskCEpisode",
     "agent_net_flow",

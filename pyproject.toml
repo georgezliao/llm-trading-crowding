@@ -12,6 +12,7 @@ dependencies = [
     "PyYAML",
     "scikit-learn",
     "lightgbm",
+    "torch",
 ]
 
 [tool.setuptools.packages.find]
