@@ -79,3 +79,21 @@ Model change, motivated by the lockout described above, not by observer metrics:
 - An order is labelled forced only if its quantity is nonzero. Cooldown steps with zero orders are not forced steps.
 
 Rerun: the identical grid, seeds, episode count, eligibility rule and selection rule from the original pre-registration, under the amended model. The result is reported alongside the original null, not in place of it. If no cell is eligible, that null is final for this model version and Experiment Zero v2 does not run.
+
+### 2026-10-26: round-2 evidence summary (simulator evidence only)
+
+- **Simulator evidence only:** all results below are from the uncalibrated synthetic HerdLab model, not real-market evidence.
+- Step 2 used 20 baseline episodes (10,000 steps): forced flow occurred in 0/20 episodes and 0/10,000 steps; its absolute-flow share was 0.
+- Those baseline episodes had mean maximum drawdown 0.055845 and mean agent share of total absolute flow 0.340333.
+- Step 4 used 20 matched low/high-overlap episode pairs; neither condition produced forced flow.
+- High-minus-low overlap maximum drawdown was -0.00000014 (95% episode-bootstrap CI [-0.00000077, 0.00000035]).
+- Excess realized-volatility difference was -0.00000001 (95% CI [-0.00000003, 0.00000000]); neither interval supports greater instability.
+- High overlap instead reduced mean C^pos by 0.00147597 (95% CI [-0.00238331, -0.00052985]) and C^flow by 0.00309075 (95% CI [-0.00558926, -0.00080477]) in this implementation.
+- Step 5 mapped 27 overlap x liquidity x drawdown cells (135 episodes): forced flow occurred in 0/27 cells and 0/135 episodes, so the baseline regime grid found no cascade region.
+- Step 10 used 200 train and 50 episodes per evaluation split; default-label base rates were 0.050000 train, 0.058816 in-distribution, 0 held-out-family, and 0.107429 held-out-impact.
+- Onset-label base rates were 0.008929 train, 0.008449 in-distribution, 0 held-out-family, and 0.012041 held-out-impact.
+- For the default label in-distribution, GRU PR-AUC was 0.7964 (95% CI [0.7571, 0.8297]) versus 0.1094 [0.0959, 0.1228] for the trivial reference; GRU Brier was 0.0229 [0.0204, 0.0253] and recall at FAR <= 0.05 was 0.9077 [0.8859, 0.9327].
+- Under held-out impact, default-label GRU PR-AUC was 0.7598 [0.7380, 0.7798], Brier 0.0480 [0.0438, 0.0523], and recall 0.7633 [0.7309, 0.7955].
+- For onset, GRU PR-AUC was 0.2487 [0.2137, 0.2973] in-distribution and 0.1214 [0.1043, 0.1456] under held-out impact, against base rates 0.008449 and 0.012041.
+- Only 11.6% of in-distribution and 30.9% of held-out-impact default events contained forced flow (onset: 11.6% and 27.5%), so the target mostly captures broader agent selling, not forced-liquidation cascades.
+- These runs show predictive signal within this selected simulator and some impact-mechanism transfer; zero held-out-family events make family generalization untestable, and the results do not establish causality, real-market validity, or that greater overlap increases crowding.
