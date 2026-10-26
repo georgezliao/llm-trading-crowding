@@ -53,3 +53,15 @@ Explicit check: does predicted crowding survive a change of impact model? If not
 ## Results log
 
 (empty; append dated entries with config, seed range, metric, baseline and caveats)
+
+### 2026-10-26: diagnostics on defaults (simulator only)
+
+Baseline cascade diagnostics (20 episodes), matched low/high-overlap pairs (20) and a 3×3×3 overlap × liquidity × drawdown-limit grid (135 episodes) recorded zero forced orders. Excess realized volatility from agent impact was about 1e-7, and high overlap moved mean C^pos and C^flow by less than 0.003. At the defaults the feedback loop behind H3 never starts, so Experiment Zero v2 was paused. Likely cause: `impact_sensitivity: 0.001` and q_max 10 at price ~100 against 10,000 cash, a gross leverage cap of about 0.1 that never approaches the risk limits. Details in `docs/reports/cascade_diagnostics.md`, `matched_crowding.md`, `regime_grid.md`.
+
+### Pre-registration (written 2026-10-26, before running): impact × leverage × drawdown grid
+
+- Grid: `impact_sensitivity` ∈ {0.001, 0.003, 0.01, 0.03, 0.1} × leverage multiplier m ∈ {1, 5, 20} (q_max and order_limit both scaled by m, giving gross leverage caps of about 0.1, 0.5, 2.0) × `risk.max_drawdown` ∈ {0.05, 0.10, 0.20}. 45 cells, 10 episodes each, seeds 0–9 shared across cells. Everything else at baseline.
+- Eligible cell: `max_drawdown` = 0.20 (the baseline value, fixed in advance); nonzero forced flow in at least 5 of 10 episodes; mean forced-step fraction ≤ 0.10; median price max drawdown ≤ 0.30; no non-finite or negative agent equity.
+- Selection: the eligible cell with the lowest `impact_sensitivity`, ties broken by the lowest m. The other drawdown limits are reported as a map only.
+- If no cell is eligible, the result is reported as a null and Experiment Zero v2 does not run until the research lead revisits the model.
+- The selected setting is fixed before any observer is trained and is not revised based on observer metrics.
