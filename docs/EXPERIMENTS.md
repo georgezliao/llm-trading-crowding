@@ -52,7 +52,6 @@ Explicit check: does predicted crowding survive a change of impact model? If not
 
 ## Results log
 
-(empty; append dated entries with config, seed range, metric, baseline and caveats)
 
 ### 2026-10-26: diagnostics on defaults (simulator only)
 
