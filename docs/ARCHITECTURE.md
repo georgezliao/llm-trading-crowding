@@ -81,6 +81,20 @@ Tasks:
 
 Y_{t,h}=1 when `max(0, -Σ_{s=t+1}^{t+h} agent_flow_s) / Σ_{s=t+1}^{t+h} D_s` exceeds a fixed threshold. Only complete, strictly future windows are labeled. The threshold is a specified empirical quantile of these scores pooled from training episodes only (95th percentile by default); validation/test episodes never enter the fit. Future price declines are reported as a separate outcome.
 
+The original window label above remains the default. Two alternative
+private-ground-truth labels are available for diagnostics and ablations:
+
+- **Onset:** first compute the same qualifying-window sequence. A qualifying
+  window is positive only when no qualifying window was active at any of the
+  preceding `h` prediction times. This removes repeated positives caused by
+  overlapping future windows around one unwind; the score and training-only
+  threshold are unchanged.
+- **Forced flow:** replace `agent_flow_s` in the numerator with the sum of only
+  negative agent orders marked as forced at step `s`. Strategy sells and
+  forced buys contribute zero, so the score is gross forced selling divided by
+  future liquidity. Forced flags and this derived score remain private and may
+  be used only to construct targets, never observer inputs.
+
 Models: logistic/linear baseline, LightGBM, GRU/temporal CNN; latent-state probabilistic sequence model only after baselines show signal.
 
 ## Real data

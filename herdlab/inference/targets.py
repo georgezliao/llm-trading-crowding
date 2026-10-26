@@ -8,7 +8,7 @@ to public records.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, TypeAlias
+from typing import Iterable, Literal, TypeAlias
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -16,6 +16,7 @@ from numpy.typing import ArrayLike, NDArray
 
 FloatArray = NDArray[np.float64]
 BoolArray = NDArray[np.bool_]
+LabelVariant: TypeAlias = Literal["window", "onset"]
 
 
 @dataclass(frozen=True)
@@ -83,16 +84,104 @@ def unwind_labels(
     *,
     horizon: int,
     threshold: float,
+    variant: LabelVariant = "window",
 ) -> BoolArray:
-    """Return ``Y[t,h]`` for complete future windows at a fixed threshold."""
+    """Return ``Y[t,h]`` for complete future windows at a fixed threshold.
+
+    The default ``"window"`` variant retains the original target: every
+    complete future window whose score exceeds ``threshold`` is positive.  The
+    ``"onset"`` variant keeps a qualifying window positive only when none of
+    the preceding ``horizon`` qualifying windows was active.  This suppresses
+    repeated positives from overlapping windows around the same unwind.
+    """
 
     cutoff = float(threshold)
     if not np.isfinite(cutoff) or cutoff < 0.0:
         raise ValueError("threshold must be finite and nonnegative")
-    return np.asarray(
+    labels = np.asarray(
         unwind_scores(agent_flow, liquidity, horizon=horizon) > cutoff,
         dtype=np.bool_,
     )
+    return _label_variant(labels, horizon=horizon, variant=variant)
+
+
+def onset_unwind_labels(
+    agent_flow: ArrayLike,
+    liquidity: ArrayLike,
+    *,
+    horizon: int,
+    threshold: float,
+) -> BoolArray:
+    """Return only separated onsets of qualifying future unwind windows."""
+
+    return unwind_labels(
+        agent_flow,
+        liquidity,
+        horizon=horizon,
+        threshold=threshold,
+        variant="onset",
+    )
+
+
+def forced_selling_flow(orders: ArrayLike, forced: ArrayLike) -> FloatArray:
+    """Return per-step flow from forced agent sells only.
+
+    ``orders`` and ``forced`` must both have shape ``(time, agents)``.  Forced
+    buys and all strategy orders contribute zero, so the result is always
+    nonpositive.  The forced flags and resulting flow are private target data.
+    """
+
+    order_values = _agent_matrix(orders, name="orders")
+    forced_values = np.asarray(forced)
+    if order_values.ndim != 2:
+        raise ValueError("orders must have shape (time, agents)")
+    if forced_values.dtype != np.bool_ or forced_values.shape != order_values.shape:
+        raise ValueError("forced must be boolean with the same shape as orders")
+    selling = np.where(forced_values & (order_values < 0.0), order_values, 0.0)
+    return np.asarray(selling.sum(axis=1), dtype=np.float64)
+
+
+def forced_unwind_scores(
+    orders: ArrayLike,
+    forced: ArrayLike,
+    liquidity: ArrayLike,
+    *,
+    horizon: int,
+) -> FloatArray:
+    """Compute future unwind scores using forced agent selling only."""
+
+    return unwind_scores(
+        forced_selling_flow(orders, forced),
+        liquidity,
+        horizon=horizon,
+    )
+
+
+def forced_unwind_labels(
+    orders: ArrayLike,
+    forced: ArrayLike,
+    liquidity: ArrayLike,
+    *,
+    horizon: int,
+    threshold: float,
+    variant: LabelVariant = "window",
+) -> BoolArray:
+    """Return fixed-threshold labels based only on forced agent selling."""
+
+    cutoff = float(threshold)
+    if not np.isfinite(cutoff) or cutoff < 0.0:
+        raise ValueError("threshold must be finite and nonnegative")
+    labels = np.asarray(
+        forced_unwind_scores(
+            orders,
+            forced,
+            liquidity,
+            horizon=horizon,
+        )
+        > cutoff,
+        dtype=np.bool_,
+    )
+    return _label_variant(labels, horizon=horizon, variant=variant)
 
 
 def fit_unwind_threshold(
@@ -184,12 +273,30 @@ def _future_window_sums(values: FloatArray, horizon: int) -> FloatArray:
     return cumulative[starts + horizon] - cumulative[starts]
 
 
+def _label_variant(
+    qualifying: BoolArray, *, horizon: int, variant: LabelVariant
+) -> BoolArray:
+    if variant == "window":
+        return qualifying
+    if variant != "onset":
+        raise ValueError("variant must be 'window' or 'onset'")
+
+    onsets = np.zeros_like(qualifying, dtype=np.bool_)
+    for index, active in enumerate(qualifying):
+        previous = qualifying[max(0, index - horizon) : index]
+        onsets[index] = bool(active and not np.any(previous))
+    return onsets
+
+
 # Explicit compute_* aliases make call sites read naturally while retaining the
 # concise names used in the architecture.
 compute_position_crowding = position_crowding
 compute_flow_crowding = flow_crowding
 compute_agent_net_flow = agent_net_flow
 compute_unwind_labels = unwind_labels
+forced_flow_unwind_scores = forced_unwind_scores
+forced_flow_unwind_labels = forced_unwind_labels
+unwind_onset_labels = onset_unwind_labels
 
 
 __all__ = [
@@ -200,8 +307,15 @@ __all__ = [
     "compute_position_crowding",
     "compute_unwind_labels",
     "fit_unwind_threshold",
+    "forced_flow_unwind_labels",
+    "forced_flow_unwind_scores",
+    "forced_selling_flow",
+    "forced_unwind_labels",
+    "forced_unwind_scores",
     "flow_crowding",
+    "onset_unwind_labels",
     "position_crowding",
     "unwind_labels",
+    "unwind_onset_labels",
     "unwind_scores",
 ]
