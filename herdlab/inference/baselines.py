@@ -100,9 +100,20 @@ class _BaseObserver:
     def _make_estimator(self) -> _ProbabilityEstimator:
         raise NotImplementedError
 
+    def _features(self, episode: TaskCEpisode) -> FloatArray:
+        return np.asarray(
+            build_public_features(
+                episode.public, return_lookback=self.return_lookback
+            ).values[: len(episode.labels)],
+            dtype=np.float64,
+        )
+
     def fit(self, episodes: Sequence[TaskCEpisode]) -> _BaseObserver:
-        features, labels = _stack_episodes(
-            episodes, return_lookback=self.return_lookback
+        if not episodes:
+            raise ValueError("episodes must not be empty")
+        features = np.concatenate([self._features(episode) for episode in episodes])
+        labels = np.concatenate(
+            [np.asarray(episode.labels, dtype=np.bool_) for episode in episodes]
         )
         unique = np.unique(labels)
         if len(unique) == 1:
@@ -121,9 +132,7 @@ class _BaseObserver:
             raise RuntimeError("observer must be fitted before prediction")
         predictions: list[FloatArray] = []
         for episode in episodes:
-            features, _ = _episode_arrays(
-                episode, return_lookback=self.return_lookback
-            )
+            features = self._features(episode)
             if self._constant_probability is not None:
                 probability = np.full(len(features), self._constant_probability)
             else:
@@ -145,6 +154,34 @@ class LogisticObserver(_BaseObserver):
                 ("model", LogisticRegression(max_iter=1000, solver="lbfgs")),
             ]
         )
+
+
+class TrivialReferenceObserver(LogisticObserver):
+    """Logistic reference using only recent absolute OFI and realized vol.
+
+    OFI is the observer-safe executed imbalance divided by the public
+    liquidity proxy.  Its absolute value is lagged causally through the
+    configured lookback; the only other input is current realized volatility.
+    """
+
+    def _features(self, episode: TaskCEpisode) -> FloatArray:
+        public = load_public_record(episode.public)
+        imbalance = np.abs(
+            np.asarray(public.executed_imbalance, dtype=np.float64)
+            / np.asarray(public.liquidity_proxy, dtype=np.float64)
+        )
+        n_steps = len(imbalance)
+        lagged = np.zeros((n_steps, self.return_lookback), dtype=np.float64)
+        for lag in range(self.return_lookback):
+            if lag < n_steps:
+                lagged[lag:, lag] = imbalance[: n_steps - lag]
+        features = np.column_stack(
+            (
+                lagged,
+                np.asarray(public.realized_volatility, dtype=np.float64),
+            )
+        )
+        return np.asarray(features[: len(episode.labels)], dtype=np.float64)
 
 
 class LightGBMObserver(_BaseObserver):
@@ -215,6 +252,7 @@ __all__ = [
     "LightGBMObserver",
     "LogisticObserver",
     "TaskCEpisode",
+    "TrivialReferenceObserver",
     "episode_train_test_split",
     "split_episodes",
 ]

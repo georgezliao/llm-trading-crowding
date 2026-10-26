@@ -8,6 +8,7 @@ from herdlab.inference.baselines import (
     LightGBMObserver,
     LogisticObserver,
     TaskCEpisode,
+    TrivialReferenceObserver,
     split_episodes,
 )
 from herdlab.market.records import PublicRecord
@@ -49,6 +50,7 @@ def test_split_keeps_complete_episodes_disjoint_and_is_deterministic() -> None:
 def test_logistic_and_lightgbm_return_one_probability_per_label() -> None:
     episodes = tuple(_episode(index) for index in range(3))
     observers = (
+        TrivialReferenceObserver(return_lookback=3),
         LogisticObserver(return_lookback=3),
         LightGBMObserver(
             return_lookback=3,

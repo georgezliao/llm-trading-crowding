@@ -8,6 +8,7 @@ import pytest
 from herdlab.evaluation.metrics import (
     brier_score,
     episode_bootstrap_ci,
+    episode_bootstrap_metrics,
     pr_auc,
     recall_at_false_alarm_rate,
 )
@@ -51,3 +52,19 @@ def test_bootstrap_resamples_episodes_and_is_deterministic() -> None:
 
     assert first == second
     assert first.lower <= first.estimate <= first.upper
+
+
+def test_bootstrap_reports_undefined_class_metrics_when_no_events() -> None:
+    labels = [np.zeros(3, dtype=np.bool_), np.zeros(2, dtype=np.bool_)]
+    probabilities = [np.full(3, 0.1), np.full(2, 0.2)]
+
+    metrics = episode_bootstrap_metrics(
+        labels,
+        probabilities,
+        rng=np.random.default_rng(3),
+        n_resamples=20,
+    )
+
+    assert np.isnan(metrics["pr_auc"].estimate)
+    assert np.isnan(metrics["recall_at_false_alarm_rate"].estimate)
+    assert metrics["brier"].estimate == pytest.approx(0.022)

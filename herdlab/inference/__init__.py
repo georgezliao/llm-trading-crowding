@@ -4,6 +4,7 @@ from herdlab.inference.baselines import (
     LightGBMObserver,
     LogisticObserver,
     TaskCEpisode,
+    TrivialReferenceObserver,
     split_episodes,
 )
 from herdlab.inference.features import PublicFeatures, build_public_features
@@ -31,6 +32,7 @@ __all__ = [
     "GRUObserver",
     "PublicFeatures",
     "TaskCEpisode",
+    "TrivialReferenceObserver",
     "agent_net_flow",
     "build_public_features",
     "fit_unwind_threshold",

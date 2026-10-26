@@ -54,15 +54,23 @@ def recall_at_false_alarm_rate(
     if positives == 0 or negatives == 0:
         raise ValueError("recall at false-alarm rate requires both classes")
 
-    best_recall = 0.0
-    thresholds = np.concatenate(([np.inf], np.unique(probabilities)[::-1]))
-    for threshold in thresholds:
-        predicted = probabilities >= threshold
-        false_alarm_rate = np.count_nonzero(predicted & ~labels) / negatives
-        if false_alarm_rate <= limit:
-            recall = np.count_nonzero(predicted & labels) / positives
-            best_recall = max(best_recall, recall)
-    return float(best_recall)
+    # Evaluate only at the end of each tied-score group.  This is equivalent
+    # to thresholding at every unique probability, but avoids constructing a
+    # full Boolean prediction vector once per threshold (quadratic work for
+    # continuous model scores).
+    order = np.argsort(-probabilities, kind="stable")
+    sorted_probabilities = probabilities[order]
+    sorted_labels = labels[order]
+    cumulative_true = np.cumsum(sorted_labels, dtype=np.int64)
+    cumulative_false = np.cumsum(~sorted_labels, dtype=np.int64)
+    group_ends = np.r_[
+        np.flatnonzero(sorted_probabilities[1:] != sorted_probabilities[:-1]),
+        len(sorted_probabilities) - 1,
+    ]
+    allowed = cumulative_false[group_ends] / negatives <= limit
+    if not np.any(allowed):
+        return 0.0
+    return float(np.max(cumulative_true[group_ends][allowed]) / positives)
 
 
 def binary_metrics(
@@ -156,28 +164,56 @@ def episode_bootstrap_metrics(
 ) -> Mapping[str, ConfidenceInterval]:
     """Return episode-bootstrap intervals for all required Task C metrics."""
 
-    metrics: dict[str, Metric] = {
-        "pr_auc": pr_auc,
-        "brier": brier_score,
-        "recall_at_false_alarm_rate": lambda labels, probabilities: (
-            recall_at_false_alarm_rate(
-                labels,
-                probabilities,
-                max_false_alarm_rate=max_false_alarm_rate,
-            )
-        ),
-    }
-    return {
-        name: episode_bootstrap_ci(
+    labels, _ = _episode_inputs(labels_by_episode, probabilities_by_episode)
+    pooled_labels = np.concatenate(labels)
+    has_positive = bool(np.any(pooled_labels))
+    has_negative = bool(np.any(~pooled_labels))
+
+    results = {
+        "brier": episode_bootstrap_ci(
             labels_by_episode,
             probabilities_by_episode,
-            metric,
+            brier_score,
             rng=rng,
             n_resamples=n_resamples,
             confidence=confidence,
         )
-        for name, metric in metrics.items()
     }
+    results["pr_auc"] = (
+        episode_bootstrap_ci(
+            labels_by_episode,
+            probabilities_by_episode,
+            pr_auc,
+            rng=rng,
+            n_resamples=n_resamples,
+            confidence=confidence,
+        )
+        if has_positive
+        else _undefined_interval()
+    )
+    results["recall_at_false_alarm_rate"] = (
+        episode_bootstrap_ci(
+            labels_by_episode,
+            probabilities_by_episode,
+            lambda labels, probabilities: recall_at_false_alarm_rate(
+                labels,
+                probabilities,
+                max_false_alarm_rate=max_false_alarm_rate,
+            ),
+            rng=rng,
+            n_resamples=n_resamples,
+            confidence=confidence,
+        )
+        if has_positive and has_negative
+        else _undefined_interval()
+    )
+    return results
+
+
+def _undefined_interval() -> ConfidenceInterval:
+    """Represent a class-dependent metric that the observed labels do not define."""
+
+    return ConfidenceInterval(estimate=np.nan, lower=np.nan, upper=np.nan)
 
 
 def _binary_inputs(

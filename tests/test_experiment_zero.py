@@ -1,10 +1,15 @@
-"""Tests for the fixed Experiment Zero pipeline smoke runner."""
+"""Tests for the fixed Experiment Zero v2 pipeline."""
 
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from herdlab.experiments.experiment_zero import EpisodeSample, evaluate_samples
+from herdlab.experiments.experiment_zero import (
+    EpisodeSample,
+    evaluate_samples,
+    load_v2_configs,
+)
 from herdlab.inference.targets import fit_unwind_threshold
 from herdlab.market.records import PublicRecord
 
@@ -23,7 +28,35 @@ def _sample(seed: int, *, flow_scale: float = 1.0) -> EpisodeSample:
         realized_volatility=np.linspace(0.0, 0.01, n_steps),
         liquidity_proxy=liquidity,
     )
-    return EpisodeSample(public=public, agent_net_flow=flow, seed=seed)
+    forced = np.zeros(n_steps, dtype=np.bool_)
+    forced[10 + seed % 5] = True
+    return EpisodeSample(
+        public=public,
+        agent_net_flow=flow,
+        forced_flow_steps=forced,
+        seed=seed,
+    )
+
+
+def test_selected_parameters_apply_to_every_matched_split() -> None:
+    configs = load_v2_configs()
+
+    assert set(configs) == {
+        "training",
+        "in_distribution",
+        "heldout_families",
+        "heldout_impact",
+    }
+    for config in configs.values():
+        assert config["market"]["impact_sensitivity"] == pytest.approx(0.03)
+        assert config["agents"]["q_max"] == pytest.approx(200.0)
+        assert config["agents"]["order_limit"] == pytest.approx(40.0)
+        assert config["agents"]["population_size"] == 30
+    assert configs["training"]["agents"]["momentum"]["count"] == 10
+    assert configs["heldout_families"]["agents"]["reversion"]["count"] == 15
+    assert configs["heldout_impact"]["agents"] == configs["training"]["agents"]
+    assert configs["training"]["market"]["impact_model"] == "linear"
+    assert configs["heldout_impact"]["market"]["impact_model"] == "concave"
 
 
 def test_evaluation_uses_training_only_threshold_and_reports_both_ecologies() -> None:
@@ -47,18 +80,45 @@ def test_evaluation_uses_training_only_threshold_and_reports_both_ecologies() ->
         bootstrap_resamples=20,
         bootstrap_seed=7,
         lightgbm_seed=8,
+        gru_seed=9,
+        gru_kwargs={
+            "sequence_length": 4,
+            "hidden_size": 4,
+            "batch_size": 32,
+            "max_epochs": 2,
+            "patience": 1,
+            "validation_fraction": 0.25,
+        },
     )
 
     assert result.threshold == expected_threshold
-    assert set(result.evaluation) == {"in_distribution", "heldout_families"}
-    for evaluation in result.evaluation.values():
-        assert 0.0 < evaluation.event_base_rate < 1.0
-        assert set(evaluation.metrics) == {"logistic_regression", "lightgbm"}
-        for metrics in evaluation.metrics.values():
-            assert set(metrics) == {
-                "pr_auc",
-                "brier",
-                "recall_at_false_alarm_rate",
+    assert set(result.labels) == {"default", "onset"}
+    for label_result in result.labels.values():
+        assert set(label_result.evaluation) == {
+            "in_distribution",
+            "heldout_families",
+        }
+        assert 0.0 <= label_result.training.fraction_events_with_forced_flow <= 1.0
+        for evaluation in label_result.evaluation.values():
+            assert 0.0 < evaluation.event_base_rate < 1.0
+            assert set(evaluation.metrics) == {
+                "trivial_reference",
+                "logistic_regression",
+                "lightgbm",
+                "gru",
             }
-            for interval in metrics.values():
-                assert 0.0 <= interval.lower <= interval.estimate <= interval.upper <= 1.0
+            assert 0.0 <= evaluation.events.fraction_events_with_forced_flow <= 1.0
+            for metrics in evaluation.metrics.values():
+                assert set(metrics) == {
+                    "pr_auc",
+                    "brier",
+                    "recall_at_false_alarm_rate",
+                }
+                for interval in metrics.values():
+                    assert (
+                        0.0
+                        <= interval.lower
+                        <= interval.estimate
+                        <= interval.upper
+                        <= 1.0
+                    )
