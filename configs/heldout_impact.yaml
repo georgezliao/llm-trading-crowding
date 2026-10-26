@@ -1,0 +1,14 @@
+# Matched market-impact split for out-of-distribution experiments. Both sides
+# inherit the same 30-agent baseline population; only the impact function
+# changes. These are simulation mechanisms, not claims about real markets.
+base_config: baseline.yaml
+
+populations:
+  train:
+    market:
+      impact_model: linear
+
+  test:
+    market:
+      impact_model: concave
+      impact_exponent: 0.5

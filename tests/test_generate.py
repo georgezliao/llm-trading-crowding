@@ -22,26 +22,54 @@ from herdlab.market.records import private_field_names
 
 PROJECT_ROOT = Path(__file__).parents[1]
 HELDOUT_CONFIG = PROJECT_ROOT / "configs" / "heldout_families.yaml"
+HELDOUT_IMPACT_CONFIG = PROJECT_ROOT / "configs" / "heldout_impact.yaml"
+
+
+def _configured_aggregate_q_max(config: dict) -> float:
+    agents = config["agents"]
+    return int(agents["population_size"]) * float(agents["q_max"])
 
 
 def test_heldout_config_resolves_named_family_populations() -> None:
+    train_config = load_population_config(HELDOUT_CONFIG, "train")
+    test_config = load_population_config(HELDOUT_CONFIG, "test")
     train = build_population(
-        load_population_config(HELDOUT_CONFIG, "train"), np.random.default_rng(1)
+        train_config, np.random.default_rng(1)
     )
     test = build_population(
-        load_population_config(HELDOUT_CONFIG, "test"), np.random.default_rng(1)
+        test_config, np.random.default_rng(1)
     )
 
-    assert len(train) == 18
-    assert sum(isinstance(agent, MomentumAgent) for agent in train) == 6
-    assert sum(isinstance(agent, LinearMLAgent) for agent in train) == 6
-    assert sum(isinstance(agent, MLPAgent) for agent in train) == 6
+    assert len(train) == len(test) == 30
+    assert _configured_aggregate_q_max(train_config) == 300.0
+    assert _configured_aggregate_q_max(test_config) == 300.0
+
+    assert sum(isinstance(agent, MomentumAgent) for agent in train) == 10
+    assert sum(isinstance(agent, LinearMLAgent) for agent in train) == 10
+    assert sum(isinstance(agent, MLPAgent) for agent in train) == 10
     assert not any(isinstance(agent, (MeanReversionAgent, LightGBMAgent)) for agent in train)
 
-    assert len(test) == 12
-    assert sum(isinstance(agent, MeanReversionAgent) for agent in test) == 6
-    assert sum(isinstance(agent, LightGBMAgent) for agent in test) == 6
+    assert sum(isinstance(agent, MeanReversionAgent) for agent in test) == 15
+    assert sum(isinstance(agent, LightGBMAgent) for agent in test) == 15
     assert not any(isinstance(agent, (MomentumAgent, LinearMLAgent, MLPAgent)) for agent in test)
+
+
+def test_heldout_impact_changes_only_impact_function() -> None:
+    train = load_population_config(HELDOUT_IMPACT_CONFIG, "train")
+    test = load_population_config(HELDOUT_IMPACT_CONFIG, "test")
+
+    assert train["agents"] == test["agents"]
+    assert train["agents"]["population_size"] == 30
+    assert _configured_aggregate_q_max(train) == _configured_aggregate_q_max(test)
+    assert train["market"] == {
+        "impact_model": "linear",
+        "impact_sensitivity": 0.001,
+    }
+    assert test["market"] == {
+        "impact_model": "concave",
+        "impact_sensitivity": 0.001,
+        "impact_exponent": 0.5,
+    }
 
 
 def test_cli_writes_correct_manifest_and_small_batch(tmp_path, monkeypatch) -> None:

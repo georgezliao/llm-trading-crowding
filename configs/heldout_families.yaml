@@ -1,32 +1,33 @@
-# Named family split for out-of-distribution pipeline tests. Counts are plain
-# experimental choices, not claims about the composition of real markets.
+# Matched named-family split for out-of-distribution experiments. Both sides
+# contain 30 agents and have the same configured aggregate q_max. Counts are
+# plain experimental choices, not claims about real-market composition.
 base_config: baseline.yaml
 
 populations:
   train:
     agents:
-      population_size: 18
+      population_size: 30
       momentum:
-        count: 6
+        count: 10
       reversion:
         count: 0
       linear:
-        count: 6
+        count: 10
       gbdt:
         count: 0
       mlp:
-        count: 6
+        count: 10
 
   test:
     agents:
-      population_size: 12
+      population_size: 30
       momentum:
         count: 0
       reversion:
-        count: 6
+        count: 15
       linear:
         count: 0
       gbdt:
-        count: 6
+        count: 15
       mlp:
         count: 0
