@@ -8,7 +8,15 @@ import numpy as np
 import yaml
 
 from herdlab.agents.base import PublicObservation
-from herdlab.agents.learned import LinearMLAgent, build_population
+from herdlab.agents.factor import MeanReversionAgent, MomentumAgent
+from herdlab.agents.learned import (
+    LightGBMAgent,
+    LinearMLAgent,
+    MLPAgent,
+    build_population,
+)
+from herdlab.market.exogenous import generate_exogenous_path
+from herdlab.market.simulator import simulate_market_records
 
 
 def _observation(returns: np.ndarray) -> PublicObservation:
@@ -105,13 +113,62 @@ def test_ridge_learns_sensible_ar1_forecasts() -> None:
 
 def test_mixed_population_contains_configured_linear_agents() -> None:
     config = deepcopy(_baseline_config())
-    config["agents"]["population_size"] = 10
+    config["agents"]["population_size"] = 5
+    config["agents"]["momentum"]["count"] = 1
+    config["agents"]["reversion"]["count"] = 1
     config["agents"]["linear"]["count"] = 2
+    config["agents"]["gbdt"]["count"] = 1
+    config["agents"]["mlp"]["count"] = 0
     first = build_population(config, np.random.default_rng(4))
     second = build_population(config, np.random.default_rng(4))
 
-    assert len(first) == 10
+    assert len(first) == 5
     assert sum(isinstance(agent, LinearMLAgent) for agent in first) == 2
     for left, right in zip(first, second, strict=True):
         assert type(left) is type(right)
         assert (left.q_max, left.k, left.u_max) == (right.q_max, right.k, right.u_max)
+
+
+def test_short_episode_runs_with_every_agent_family() -> None:
+    config = deepcopy(_baseline_config())
+    config["simulation"]["n_steps"] = 50
+    config["agents"]["population_size"] = 5
+    for family in ("momentum", "reversion", "linear", "gbdt", "mlp"):
+        config["agents"][family]["count"] = 1
+    config["agents"]["linear"]["refit_interval"] = 20
+    config["agents"]["gbdt"]["refit_interval"] = 20
+    config["agents"]["mlp"]["refit_interval"] = 20
+
+    rng = np.random.default_rng(91)
+    path = generate_exogenous_path(config, rng)
+    population = build_population(config, rng)
+    public, private = simulate_market_records(config, population, path)
+
+    expected_types = (
+        MomentumAgent,
+        MeanReversionAgent,
+        LinearMLAgent,
+        LightGBMAgent,
+        MLPAgent,
+    )
+    assert tuple(type(agent) for agent in population) == expected_types
+    assert public.returns.shape == (50,)
+    assert private.orders.shape == (50, 5)
+    assert np.all(np.isfinite(private.orders))
+    assert all(
+        agent.last_fit_step is not None
+        for agent in population
+        if isinstance(agent, (LinearMLAgent, LightGBMAgent, MLPAgent))
+    )
+
+
+def test_baseline_has_six_agents_in_each_family() -> None:
+    population = build_population(_baseline_config(), np.random.default_rng(12))
+    for family in (
+        MomentumAgent,
+        MeanReversionAgent,
+        LinearMLAgent,
+        LightGBMAgent,
+        MLPAgent,
+    ):
+        assert sum(isinstance(agent, family) for agent in population) == 6

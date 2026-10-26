@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Mapping
 
+import lightgbm as lgb
 import numpy as np
 from numpy.typing import NDArray
 
@@ -115,6 +116,215 @@ class LinearMLAgent(Agent):
         self._fit_sample_count = int(targets.size)
 
 
+class LightGBMAgent(Agent):
+    """Small LightGBM return forecaster with causal rolling refits."""
+
+    def __init__(
+        self,
+        *,
+        lookback: int,
+        refit_interval: int,
+        training_window: int,
+        min_samples: int,
+        n_estimators: int,
+        learning_rate: float,
+        num_leaves: int,
+        random_seed: int,
+        **kwargs: float,
+    ) -> None:
+        super().__init__(**kwargs)
+        _validate_rolling_parameters(
+            lookback, refit_interval, training_window, min_samples
+        )
+        if n_estimators <= 0:
+            raise ValueError("n_estimators must be positive")
+        if not np.isfinite(learning_rate) or learning_rate <= 0.0:
+            raise ValueError("learning_rate must be finite and positive")
+        if num_leaves < 2:
+            raise ValueError("num_leaves must be at least two")
+
+        self.lookback = int(lookback)
+        self.refit_interval = int(refit_interval)
+        self.training_window = int(training_window)
+        self.min_samples = int(min_samples)
+        self.n_estimators = int(n_estimators)
+        self.learning_rate = float(learning_rate)
+        self.num_leaves = int(num_leaves)
+        self.random_seed = int(random_seed)
+        self._model: lgb.LGBMRegressor | None = None
+        self._last_fit_step: int | None = None
+        self._fit_sample_count = 0
+
+    @property
+    def last_fit_step(self) -> int | None:
+        return self._last_fit_step
+
+    @property
+    def fit_sample_count(self) -> int:
+        return self._fit_sample_count
+
+    def forecast(self, observation: PublicObservation) -> float:
+        history = _validated_history(observation.returns)
+        features, targets = _lagged_examples(history, self.lookback)
+        if _should_refit(
+            targets.size,
+            self.min_samples,
+            observation.step,
+            self._last_fit_step,
+            self.refit_interval,
+        ):
+            self._fit(
+                features[-self.training_window :], targets[-self.training_window :]
+            )
+            self._last_fit_step = int(observation.step)
+
+        if history.size < self.lookback or self._model is None:
+            return 0.0
+        prediction = self._model.predict(history[-self.lookback :].reshape(1, -1))
+        return float(prediction[0])
+
+    def _fit(self, features: FloatArray, targets: FloatArray) -> None:
+        self._model = lgb.LGBMRegressor(
+            objective="regression",
+            n_estimators=self.n_estimators,
+            learning_rate=self.learning_rate,
+            num_leaves=self.num_leaves,
+            max_depth=3,
+            min_child_samples=5,
+            subsample=1.0,
+            colsample_bytree=1.0,
+            reg_lambda=1.0e-4,
+            random_state=self.random_seed,
+            n_jobs=1,
+            verbosity=-1,
+            deterministic=True,
+            force_col_wise=True,
+        )
+        self._model.fit(features, targets)
+        self._fit_sample_count = int(targets.size)
+
+
+class MLPAgent(Agent):
+    """One-hidden-layer NumPy MLP trained by deterministic full-batch descent."""
+
+    def __init__(
+        self,
+        *,
+        lookback: int,
+        refit_interval: int,
+        training_window: int,
+        min_samples: int,
+        hidden_size: int,
+        epochs: int,
+        learning_rate: float,
+        l2: float,
+        rng: np.random.Generator,
+        **kwargs: float,
+    ) -> None:
+        super().__init__(**kwargs)
+        _validate_rolling_parameters(
+            lookback, refit_interval, training_window, min_samples
+        )
+        if hidden_size <= 0 or epochs <= 0:
+            raise ValueError("hidden_size and epochs must be positive")
+        if not np.isfinite(learning_rate) or learning_rate <= 0.0:
+            raise ValueError("learning_rate must be finite and positive")
+        if not np.isfinite(l2) or l2 < 0.0:
+            raise ValueError("l2 must be finite and nonnegative")
+        if not isinstance(rng, np.random.Generator):
+            raise TypeError("rng must be a numpy.random.Generator")
+
+        self.lookback = int(lookback)
+        self.refit_interval = int(refit_interval)
+        self.training_window = int(training_window)
+        self.min_samples = int(min_samples)
+        self.hidden_size = int(hidden_size)
+        self.epochs = int(epochs)
+        self.learning_rate = float(learning_rate)
+        self.l2 = float(l2)
+        self._rng = rng
+        self._weights_1: FloatArray | None = None
+        self._bias_1: FloatArray | None = None
+        self._weights_2: FloatArray | None = None
+        self._bias_2 = 0.0
+        self._feature_mean = np.zeros(self.lookback, dtype=np.float64)
+        self._feature_scale = np.ones(self.lookback, dtype=np.float64)
+        self._target_mean = 0.0
+        self._target_scale = 1.0
+        self._last_fit_step: int | None = None
+        self._fit_sample_count = 0
+
+    @property
+    def last_fit_step(self) -> int | None:
+        return self._last_fit_step
+
+    @property
+    def fit_sample_count(self) -> int:
+        return self._fit_sample_count
+
+    def forecast(self, observation: PublicObservation) -> float:
+        history = _validated_history(observation.returns)
+        features, targets = _lagged_examples(history, self.lookback)
+        if _should_refit(
+            targets.size,
+            self.min_samples,
+            observation.step,
+            self._last_fit_step,
+            self.refit_interval,
+        ):
+            self._fit(
+                features[-self.training_window :], targets[-self.training_window :]
+            )
+            self._last_fit_step = int(observation.step)
+
+        if history.size < self.lookback or self._weights_1 is None:
+            return 0.0
+        current = (history[-self.lookback :] - self._feature_mean) / self._feature_scale
+        hidden = np.tanh(current @ self._weights_1 + self._bias_1)
+        scaled_prediction = float(hidden @ self._weights_2 + self._bias_2)
+        return self._target_mean + self._target_scale * scaled_prediction
+
+    def _fit(self, features: FloatArray, targets: FloatArray) -> None:
+        self._feature_mean = features.mean(axis=0)
+        feature_std = features.std(axis=0)
+        self._feature_scale = np.where(feature_std > 1.0e-12, feature_std, 1.0)
+        self._target_mean = float(targets.mean())
+        target_std = float(targets.std())
+        self._target_scale = target_std if target_std > 1.0e-12 else 1.0
+        x = (features - self._feature_mean) / self._feature_scale
+        y = (targets - self._target_mean) / self._target_scale
+
+        limit_1 = np.sqrt(6.0 / (self.lookback + self.hidden_size))
+        weights_1 = self._rng.uniform(
+            -limit_1, limit_1, size=(self.lookback, self.hidden_size)
+        )
+        bias_1 = np.zeros(self.hidden_size, dtype=np.float64)
+        limit_2 = np.sqrt(6.0 / (self.hidden_size + 1))
+        weights_2 = self._rng.uniform(-limit_2, limit_2, size=self.hidden_size)
+        bias_2 = 0.0
+
+        sample_count = targets.size
+        for _ in range(self.epochs):
+            hidden = np.tanh(x @ weights_1 + bias_1)
+            predictions = hidden @ weights_2 + bias_2
+            error = predictions - y
+            gradient_2 = hidden.T @ error / sample_count + self.l2 * weights_2
+            gradient_bias_2 = float(error.mean())
+            hidden_gradient = np.outer(error, weights_2) * (1.0 - hidden**2)
+            gradient_1 = x.T @ hidden_gradient / sample_count + self.l2 * weights_1
+            gradient_bias_1 = hidden_gradient.mean(axis=0)
+            weights_2 -= self.learning_rate * gradient_2
+            bias_2 -= self.learning_rate * gradient_bias_2
+            weights_1 -= self.learning_rate * gradient_1
+            bias_1 -= self.learning_rate * gradient_bias_1
+
+        self._weights_1 = weights_1
+        self._bias_1 = bias_1
+        self._weights_2 = weights_2
+        self._bias_2 = bias_2
+        self._fit_sample_count = int(sample_count)
+
+
 def build_linear_population(
     config: Mapping[str, Any], rng: np.random.Generator
 ) -> list[LinearMLAgent]:
@@ -148,28 +358,149 @@ def build_linear_population(
     return population
 
 
+def build_gbdt_population(
+    config: Mapping[str, Any], rng: np.random.Generator
+) -> list[LightGBMAgent]:
+    """Build the configured LightGBM family using deterministic agent seeds."""
+
+    agents = config["agents"] if "agents" in config else config
+    learned = agents.get("gbdt", {})
+    count = _nonnegative_count(learned, "gbdt")
+    dispersion = _validated_dispersion(agents)
+    population: list[LightGBMAgent] = []
+    for _ in range(count):
+        population.append(
+            LightGBMAgent(
+                lookback=int(learned["lookback"]),
+                refit_interval=int(learned["refit_interval"]),
+                training_window=int(learned["training_window"]),
+                min_samples=int(learned["min_samples"]),
+                n_estimators=int(learned["n_estimators"]),
+                learning_rate=float(learned["learning_rate"]),
+                num_leaves=int(learned["num_leaves"]),
+                random_seed=int(rng.integers(0, np.iinfo(np.int32).max)),
+                q_max=_disperse(float(agents["q_max"]), dispersion, rng),
+                k=_disperse(float(agents["risk_aversion_k"]), dispersion, rng),
+                u_max=_disperse(float(agents["order_limit"]), dispersion, rng),
+                epsilon=float(agents.get("epsilon", 1.0e-8)),
+            )
+        )
+    return population
+
+
+def build_mlp_population(
+    config: Mapping[str, Any], rng: np.random.Generator
+) -> list[MLPAgent]:
+    """Build the configured small NumPy-MLP family."""
+
+    agents = config["agents"] if "agents" in config else config
+    learned = agents.get("mlp", {})
+    count = _nonnegative_count(learned, "mlp")
+    dispersion = _validated_dispersion(agents)
+    population: list[MLPAgent] = []
+    for _ in range(count):
+        model_rng = np.random.default_rng(
+            int(rng.integers(0, np.iinfo(np.int64).max))
+        )
+        population.append(
+            MLPAgent(
+                lookback=int(learned["lookback"]),
+                refit_interval=int(learned["refit_interval"]),
+                training_window=int(learned["training_window"]),
+                min_samples=int(learned["min_samples"]),
+                hidden_size=int(learned["hidden_size"]),
+                epochs=int(learned["epochs"]),
+                learning_rate=float(learned["learning_rate"]),
+                l2=float(learned["l2"]),
+                rng=model_rng,
+                q_max=_disperse(float(agents["q_max"]), dispersion, rng),
+                k=_disperse(float(agents["risk_aversion_k"]), dispersion, rng),
+                u_max=_disperse(float(agents["order_limit"]), dispersion, rng),
+                epsilon=float(agents.get("epsilon", 1.0e-8)),
+            )
+        )
+    return population
+
+
 def build_population(config: Mapping[str, Any], rng: np.random.Generator) -> list[Agent]:
-    """Build factor and linear agents while preserving total population size."""
+    """Build all five configured families and validate their explicit counts."""
 
     agents = config["agents"] if "agents" in config else config
     total = int(agents["population_size"])
-    linear_count = int(agents.get("linear", {}).get("count", 0))
-    factor_count = total - linear_count
-    if factor_count < 0:
-        raise ValueError("agents.linear.count cannot exceed agents.population_size")
+    momentum_count = _nonnegative_count(agents.get("momentum", {}), "momentum")
+    reversion_count = _nonnegative_count(agents.get("reversion", {}), "reversion")
+    linear_count = _nonnegative_count(agents.get("linear", {}), "linear")
+    gbdt_count = _nonnegative_count(agents.get("gbdt", {}), "gbdt")
+    mlp_count = _nonnegative_count(agents.get("mlp", {}), "mlp")
+    configured_total = (
+        momentum_count + reversion_count + linear_count + gbdt_count + mlp_count
+    )
+    if configured_total != total:
+        raise ValueError(
+            "configured family counts must sum to agents.population_size "
+            f"({configured_total} != {total})"
+        )
 
     factor_config = deepcopy(dict(config))
+    factor_count = momentum_count + reversion_count
     if "agents" in config:
         factor_config["agents"] = deepcopy(dict(agents))
         factor_config["agents"]["population_size"] = factor_count
+        factor_config["agents"]["momentum_fraction"] = (
+            momentum_count / factor_count if factor_count else 0.0
+        )
     else:
         factor_config["population_size"] = factor_count
+        factor_config["momentum_fraction"] = (
+            momentum_count / factor_count if factor_count else 0.0
+        )
 
     population: list[Agent] = []
     if factor_count:
         population.extend(build_factor_population(factor_config, rng))
     population.extend(build_linear_population(config, rng))
+    population.extend(build_gbdt_population(config, rng))
+    population.extend(build_mlp_population(config, rng))
     return population
+
+
+def _validate_rolling_parameters(
+    lookback: int, refit_interval: int, training_window: int, min_samples: int
+) -> None:
+    if lookback <= 0:
+        raise ValueError("lookback must be positive")
+    if refit_interval <= 0:
+        raise ValueError("refit_interval must be positive")
+    if training_window <= 0:
+        raise ValueError("training_window must be positive")
+    if min_samples <= 0 or min_samples > training_window:
+        raise ValueError("min_samples must be in [1, training_window]")
+
+
+def _should_refit(
+    sample_count: int,
+    min_samples: int,
+    step: int,
+    last_fit_step: int | None,
+    refit_interval: int,
+) -> bool:
+    return sample_count >= min_samples and (
+        last_fit_step is None or step - last_fit_step >= refit_interval
+    )
+
+
+def _nonnegative_count(config: Mapping[str, Any], family: str) -> int:
+    count = int(config.get("count", 0))
+    if count < 0:
+        raise ValueError(f"agents.{family}.count must be nonnegative")
+    return count
+
+
+def _validated_dispersion(agents: Mapping[str, Any]) -> float:
+    dispersion = float(agents["parameter_dispersion"])
+    if dispersion < 0.0 or not np.isfinite(dispersion):
+        raise ValueError("agents.parameter_dispersion must be finite and nonnegative")
+    return dispersion
 
 
 def _validated_history(returns: FloatArray) -> FloatArray:
@@ -195,4 +526,12 @@ def _disperse(base: float, dispersion: float, rng: np.random.Generator) -> float
     return float(base * rng.lognormal(-0.5 * dispersion**2, dispersion))
 
 
-__all__ = ["LinearMLAgent", "build_linear_population", "build_population"]
+__all__ = [
+    "LightGBMAgent",
+    "LinearMLAgent",
+    "MLPAgent",
+    "build_gbdt_population",
+    "build_linear_population",
+    "build_mlp_population",
+    "build_population",
+]
