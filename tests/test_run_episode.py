@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
@@ -9,7 +10,7 @@ import numpy as np
 import yaml
 
 from herdlab.agents.factor import build_factor_population
-from herdlab.experiments.run_episode import main
+from herdlab.experiments.run_episode import main, prepare_episode
 from herdlab.inference.observer_data import load_public_record
 from herdlab.market.exogenous import ExogenousPath, generate_exogenous_path
 from herdlab.market.records import private_field_names, public_field_names
@@ -75,6 +76,35 @@ def test_cli_writes_separate_deterministic_archives(tmp_path, monkeypatch) -> No
         for name in first_private
     )
     load_public_record(first / "public.npz")
+
+
+def test_different_populations_share_identical_exogenous_path() -> None:
+    first_config = _config(n_steps=31)
+    first_config["agents"]["population_size"] = 2
+    first_config["agents"]["momentum"]["count"] = 1
+    first_config["agents"]["reversion"]["count"] = 1
+    for family in ("linear", "gbdt", "mlp"):
+        first_config["agents"][family]["count"] = 0
+
+    second_config = deepcopy(first_config)
+    second_config["agents"]["population_size"] = 5
+    second_config["agents"]["momentum"]["count"] = 0
+    second_config["agents"]["reversion"]["count"] = 2
+    second_config["agents"]["linear"]["count"] = 1
+    second_config["agents"]["gbdt"]["count"] = 1
+    second_config["agents"]["mlp"]["count"] = 1
+    second_config["agents"]["parameter_dispersion"] = 0.35
+    second_config["agents"]["feature_overlap"] = 0.9
+
+    first_path, first_population = prepare_episode(first_config, seed=9127)
+    second_path, second_population = prepare_episode(second_config, seed=9127)
+
+    assert len(first_population) == 2
+    assert len(second_population) == 5
+    for field in first_path.__dataclass_fields__:
+        np.testing.assert_array_equal(
+            getattr(first_path, field), getattr(second_path, field)
+        )
 
 
 def test_future_return_perturbation_does_not_change_orders_through_t() -> None:

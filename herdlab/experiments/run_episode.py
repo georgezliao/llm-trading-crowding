@@ -15,20 +15,39 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import yaml
 
+from herdlab.agents.base import Agent
 from herdlab.agents.learned import build_population
-from herdlab.market.exogenous import generate_exogenous_path
+from herdlab.market.exogenous import ExogenousPath, generate_exogenous_path
 from herdlab.market.records import PrivateRecord, PublicRecord
 from herdlab.market.simulator import simulate_market_records
+
+
+def prepare_episode(
+    config: Mapping[str, Any], seed: int
+) -> tuple[ExogenousPath, list[Agent]]:
+    """Build deterministic episode inputs from independent random streams.
+
+    ``seed`` identifies the whole episode.  NumPy ``SeedSequence`` child
+    streams isolate exogenous market draws from all population construction
+    draws, so changing agent counts, families, or parameters cannot advance
+    or otherwise alter the exogenous stream.  Reusing the episode seed across
+    population configurations therefore provides common random numbers.
+    """
+
+    exogenous_seed, agent_seed = np.random.SeedSequence(seed).spawn(2)
+    exogenous_rng = np.random.default_rng(exogenous_seed)
+    agent_rng = np.random.default_rng(agent_seed)
+    exogenous = generate_exogenous_path(config, exogenous_rng)
+    agents = build_population(config, agent_rng)
+    return exogenous, agents
 
 
 def run_episode(
     config: Mapping[str, Any], seed: int
 ) -> tuple[PublicRecord, PrivateRecord]:
-    """Simulate one episode using a single RNG initialized from ``seed``."""
+    """Simulate one episode from deterministic exogenous and agent streams."""
 
-    rng = np.random.default_rng(seed)
-    exogenous = generate_exogenous_path(config, rng)
-    agents = build_population(config, rng)
+    exogenous, agents = prepare_episode(config, seed)
     return simulate_market_records(config, agents, exogenous)
 
 
@@ -79,4 +98,4 @@ if __name__ == "__main__":
     main()
 
 
-__all__ = ["load_config", "main", "run_episode", "write_episode"]
+__all__ = ["load_config", "main", "prepare_episode", "run_episode", "write_episode"]
