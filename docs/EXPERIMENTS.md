@@ -97,3 +97,21 @@ Rerun: the identical grid, seeds, episode count, eligibility rule and selection 
 - For onset, GRU PR-AUC was 0.2487 [0.2137, 0.2973] in-distribution and 0.1214 [0.1043, 0.1456] under held-out impact, against base rates 0.008449 and 0.012041.
 - Only 11.6% of in-distribution and 30.9% of held-out-impact default events contained forced flow (onset: 11.6% and 27.5%), so the target mostly captures broader agent selling, not forced-liquidation cascades.
 - These runs show predictive signal within this selected simulator and some impact-mechanism transfer; zero held-out-family events make family generalization untestable, and the results do not establish causality, real-market validity, or that greater overlap increases crowding.
+
+### Pre-registration, round 3 (written 2026-10-26, before running)
+
+Motivation, from the research lead's review of `experiment_zero_v2.md`: the held-out-family split had zero events and so was uninformative; only about 10% of default-label events overlap forced flow; agents are deterministic functions of public prices, so the observer may be replicating known strategy rules; GRU results came from a single training seed.
+
+Fixed setting: `configs/experiment_zero.yaml` (impact 0.03, leverage ×20, drawdown limit 0.20, Amendment 1 risk rule), horizon 10, training-only 0.95 score quantile for every label.
+
+1. **Held-out-architecture split.** Train population: momentum 6, reversion 6, linear 9, MLP 9. Test population: momentum 6, reversion 6, GBDT 18. Same total count (30) and aggregate q_max. Seeds: train 5000–5199, in-distribution test 5500–5549, held-out-architecture test 6500–6549. The split is informative only if the held-out test default-label base rate is at least 1%; otherwise it is reported as uninformative and no generalization claim is made from it.
+2. **Labels:** default, onset, and forced-flow (score uses only forced agent selling), each with its own training-only threshold.
+3. **Strategy-replication control.** A baseline whose features are the target exposures and order signals that the baseline momentum and reversion rules (config lookback, k, q_max, tanh rule, no per-agent dispersion) would produce from public prices, plus their lagged changes, fed to LightGBM with the same settings as the LightGBM observer.
+4. **GRU seed variance.** Five GRU training seeds (6000–6004). The primary GRU score is the seed-averaged predicted probability; per-seed metrics and the min–max range are also reported.
+5. **Observers:** trivial reference, logistic, LightGBM, replicator, GRU (5 seeds and ensemble), on the v2 splits (same seeds as v2) and the new architecture split.
+6. **Primary comparisons:** paired episode-bootstrap 95% CIs of PR-AUC differences, GRU ensemble minus replicator and GRU ensemble minus LightGBM, on every split and label.
+7. **Decision rules, fixed now:**
+   - If GRU ensemble minus replicator has a CI that includes or lies below 0 on a split, the observer's advantage on that split is reported as consistent with strategy replication.
+   - Evidence for H2-style generalization requires, on the held-out-architecture split (if informative), the GRU ensemble to beat both the trivial reference and the replicator with paired CIs excluding 0, on the default label. Results on the onset and forced-flow labels are reported as secondary.
+   - Forced-flow-label results with fewer than 30 test events in a split are reported as underpowered.
+8. No simulator parameter, threshold rule, observer hyperparameter or seed range is changed after viewing round-3 metrics.
