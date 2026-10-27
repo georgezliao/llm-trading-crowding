@@ -36,6 +36,21 @@ Do NOT run git commit; the driver commits after its own test run. Do not touch l
     -o "$LOG_DIR/run_${i}_last.md" - <<<"$PROMPT" >"$LOG_DIR/run_${i}.log" 2>&1
   CODEX_RC=$?
 
+  # Codex usage limit: wait for the reset time it reports, then retry the same
+  # step (the run doesn't count against MAX_RUNS). Partial edits stay in place.
+  RESET="$(grep -oE 'try again at [0-9]{1,2}:[0-9]{2} ?[AP]M' "$LOG_DIR/run_${i}.log" | tail -1 | sed -E 's/try again at //; s/ //')"
+  if [ -n "$RESET" ]; then
+    TARGET="$(date -j -f '%Y-%m-%d %I:%M%p' "$(date +%Y-%m-%d) $RESET" +%s 2>/dev/null)"
+    if [ -n "$TARGET" ]; then
+      [ "$TARGET" -le "$(date +%s)" ] && TARGET=$((TARGET + 86400))
+      echo "WAIT: Codex usage limit; retrying at $RESET (+2 min)" | tee -a "$STATUS"
+      while [ "$(date +%s)" -lt $((TARGET + 120)) ]; do sleep 60; done
+      mv "$LOG_DIR/run_${i}.log" "$LOG_DIR/run_${i}_limited_$(date +%s).log"
+      i=$((i - 1))
+      continue
+    fi
+  fi
+
   # Hook: tests must pass.
   if ! .venv/bin/pytest -q >"$LOG_DIR/run_${i}_pytest.log" 2>&1; then
     echo "HALT: tests failed after run $i (codex rc=$CODEX_RC). See $LOG_DIR/run_${i}_pytest.log" | tee "$STATUS"
