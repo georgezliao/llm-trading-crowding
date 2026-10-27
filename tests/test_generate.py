@@ -27,6 +27,10 @@ from herdlab.market.records import private_field_names
 PROJECT_ROOT = Path(__file__).parents[1]
 HELDOUT_CONFIG = PROJECT_ROOT / "configs" / "heldout_families.yaml"
 HELDOUT_IMPACT_CONFIG = PROJECT_ROOT / "configs" / "heldout_impact.yaml"
+HELDOUT_ARCHITECTURE_CONFIG = (
+    PROJECT_ROOT / "configs" / "heldout_architecture.yaml"
+)
+EXPERIMENT_ZERO_CONFIG = PROJECT_ROOT / "configs" / "experiment_zero.yaml"
 
 
 def _configured_aggregate_q_max(config: dict) -> float:
@@ -74,6 +78,47 @@ def test_heldout_impact_changes_only_impact_function() -> None:
         "impact_sensitivity": 0.001,
         "impact_exponent": 0.5,
     }
+
+
+def test_heldout_architecture_config_matches_preregistered_populations() -> None:
+    selected = yaml.safe_load(EXPERIMENT_ZERO_CONFIG.read_text(encoding="utf-8"))
+    train = load_population_config(HELDOUT_ARCHITECTURE_CONFIG, "train")
+    test = load_population_config(HELDOUT_ARCHITECTURE_CONFIG, "test")
+
+    expected_counts = {
+        "train": {
+            "momentum": 6,
+            "reversion": 6,
+            "linear": 9,
+            "gbdt": 0,
+            "mlp": 9,
+        },
+        "test": {
+            "momentum": 6,
+            "reversion": 6,
+            "linear": 0,
+            "gbdt": 18,
+            "mlp": 0,
+        },
+    }
+    for name, config in (("train", train), ("test", test)):
+        counts = {
+            family: int(config["agents"][family]["count"])
+            for family in expected_counts[name]
+        }
+        assert counts == expected_counts[name]
+        assert sum(counts.values()) == config["agents"]["population_size"] == 30
+
+        assert config["market"]["impact_sensitivity"] == selected["market"][
+            "impact_sensitivity"
+        ]
+        assert config["agents"]["q_max"] == selected["agents"]["q_max"]
+        assert config["agents"]["order_limit"] == selected["agents"]["order_limit"]
+        assert config["agents"]["risk"]["max_leverage"] == selected["agents"][
+            "risk"
+        ]["max_leverage"]
+
+    assert _configured_aggregate_q_max(train) == _configured_aggregate_q_max(test)
 
 
 def test_cli_writes_correct_manifest_and_small_batch(tmp_path, monkeypatch) -> None:

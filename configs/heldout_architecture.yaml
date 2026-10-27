@@ -1,0 +1,33 @@
+# Pre-registered held-out-architecture split for round 3. Both populations
+# inherit the selected Experiment Zero impact, leverage, and risk settings,
+# contain 30 agents, and have identical configured aggregate q_max.
+base_config: experiment_zero.yaml
+
+populations:
+  train:
+    agents:
+      population_size: 30
+      momentum:
+        count: 6
+      reversion:
+        count: 6
+      linear:
+        count: 9
+      gbdt:
+        count: 0
+      mlp:
+        count: 9
+
+  test:
+    agents:
+      population_size: 30
+      momentum:
+        count: 6
+      reversion:
+        count: 6
+      linear:
+        count: 0
+      gbdt:
+        count: 18
+      mlp:
+        count: 0
