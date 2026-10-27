@@ -115,3 +115,22 @@ Fixed setting: `configs/experiment_zero.yaml` (impact 0.03, leverage ×20, drawd
    - Evidence for H2-style generalization requires, on the held-out-architecture split (if informative), the GRU ensemble to beat both the trivial reference and the replicator with paired CIs excluding 0, on the default label. Results on the onset and forced-flow labels are reported as secondary.
    - Forced-flow-label results with fewer than 30 test events in a split are reported as underpowered.
 8. No simulator parameter, threshold rule, observer hyperparameter or seed range is changed after viewing round-3 metrics.
+
+### 2026-10-27: round-3 generalization and replication controls (simulator evidence only)
+
+- **Simulator evidence only:** these results come from the uncalibrated synthetic HerdLab model, not real markets, funds, or live trading.
+- The held-out-architecture default split was informative: 378/24,500 positives, a 0.015429 base rate above the pre-registered 1% minimum.
+- On that split, GRU-ensemble default-label PR-AUC was 0.6571 (95% CI [0.4096, 0.7874]), versus 0.0396 [0.0140, 0.0772] for the trivial reference and 0.0223 [0.0076, 0.0437] for the strategy replicator.
+- Paired GRU-minus-trivial and GRU-minus-replicator differences there were 0.6175 [0.3823, 0.7314] and 0.6348 [0.4141, 0.7551]; the pre-registered H2-style generalization rule therefore passed in this simulator.
+- GRU also exceeded LightGBM on held-out-architecture/default by 0.0539 [0.0272, 0.0995], while its five-seed PR-AUC range was 0.6091–0.6727.
+- V2 default-label base rates were 0.058816 in-distribution, 0 in held-out families, and 0.107429 under held-out impact; the zero-event family split remains uninformative.
+- V2 default GRU PR-AUC was 0.8048 [0.7700, 0.8345] in-distribution and 0.7433 [0.7212, 0.7641] under held-out impact.
+- Its paired advantage over the replicator was 0.5676 [0.5344, 0.5977] in-distribution and 0.4175 [0.3823, 0.4554] under held-out impact; both exclude zero above.
+- Its paired advantage over LightGBM on those default splits was 0.0909 [0.0724, 0.1098] and 0.1315 [0.1077, 0.1564].
+- Onset-label GRU-minus-replicator intervals also excluded zero wherever events existed; held-out-architecture/onset was 0.1170 [0.0770, 0.1741] at a 0.004000 base rate.
+- Forced-flow base rates were 0.045347, 0.000490, and 0.076776 across the three V2 test splits, and 0.050857 and 0.046939 across the architecture test splits.
+- V2 held-out-family forced flow had only 12 events and is underpowered by the pre-registered 30-event rule; its apparent metrics support no conclusion.
+- On V2 held-out-impact forced flow, GRU minus replicator was -0.0037 [-0.0232, 0.0177], so the pre-registered rule reports the advantage as consistent with strategy replication on that split.
+- On held-out-architecture forced flow, GRU PR-AUC was 0.1646 [0.1134, 0.2089], with paired gains of 0.0599 [0.0260, 0.0927] over the replicator and 0.0366 [0.0131, 0.0602] over LightGBM.
+- The five-seed ranges, including 0.6672–0.7598 for V2 held-out-impact/default, show meaningful training-seed variation but do not overturn the ensemble rule outcomes.
+- These runs show predictive public-data signal and architecture/impact transfer under this fixed simulator; they do not establish identifiable hidden positions, causality, unseen-strategy or market-mechanics generalization, or real-market validity.
