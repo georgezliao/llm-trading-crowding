@@ -7,6 +7,7 @@ import numpy as np
 from herdlab.inference.baselines import (
     LightGBMObserver,
     LogisticObserver,
+    StrategyReplicationObserver,
     TaskCEpisode,
     TrivialReferenceObserver,
     split_episodes,
@@ -63,3 +64,47 @@ def test_logistic_and_lightgbm_return_one_probability_per_label() -> None:
         assert len(predictions) == 1
         assert predictions[0].shape == np.asarray(episodes[2].labels).shape
         assert np.all((0.0 <= predictions[0]) & (predictions[0] <= 1.0))
+
+
+def test_strategy_replicator_uses_the_lightgbm_observer_settings() -> None:
+    config = {
+        "simulation": {"realized_vol_lookback": 3},
+        "agents": {
+            "lookback": 3,
+            "q_max": 10.0,
+            "risk_aversion_k": 2.0,
+            "order_limit": 4.0,
+            "epsilon": 1.0e-8,
+        },
+    }
+    standard = LightGBMObserver(
+        return_lookback=3,
+        rng=np.random.default_rng(17),
+        n_estimators=7,
+        learning_rate=0.02,
+        num_leaves=9,
+    )
+    replicator = StrategyReplicationObserver(
+        config,
+        rng=np.random.default_rng(17),
+        n_estimators=7,
+        learning_rate=0.02,
+        num_leaves=9,
+    )
+    standard_params = standard._make_estimator().get_params()
+    replicator_params = replicator._make_estimator().get_params()
+    for name in (
+        "objective",
+        "n_estimators",
+        "learning_rate",
+        "num_leaves",
+        "random_state",
+        "n_jobs",
+        "deterministic",
+        "force_col_wise",
+    ):
+        assert replicator_params[name] == standard_params[name]
+
+    episodes = tuple(_episode(index) for index in range(3))
+    predictions = replicator.fit(episodes[:2]).predict_proba(episodes[2:])
+    assert predictions[0].shape == np.asarray(episodes[2].labels).shape

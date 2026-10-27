@@ -3,11 +3,16 @@
 from herdlab.inference.baselines import (
     LightGBMObserver,
     LogisticObserver,
+    StrategyReplicationObserver,
     TaskCEpisode,
     TrivialReferenceObserver,
     split_episodes,
 )
-from herdlab.inference.features import PublicFeatures, build_public_features
+from herdlab.inference.features import (
+    PublicFeatures,
+    build_public_features,
+    build_strategy_replication_features,
+)
 from herdlab.inference.observer_data import load_public_record
 from herdlab.inference.temporal import GRUObserver
 
@@ -29,12 +34,14 @@ __all__ = [
     "UnwindEpisode",
     "LightGBMObserver",
     "LogisticObserver",
+    "StrategyReplicationObserver",
     "GRUObserver",
     "PublicFeatures",
     "TaskCEpisode",
     "TrivialReferenceObserver",
     "agent_net_flow",
     "build_public_features",
+    "build_strategy_replication_features",
     "fit_unwind_threshold",
     "forced_selling_flow",
     "forced_unwind_labels",

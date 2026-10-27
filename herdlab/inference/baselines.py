@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence, TypeVar
+from typing import Any, Mapping, Protocol, Sequence, TypeVar
 
 import numpy as np
 from lightgbm import LGBMClassifier
@@ -12,7 +12,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from herdlab.inference.features import build_public_features
+from herdlab.inference.features import (
+    build_public_features,
+    build_strategy_replication_features,
+)
 from herdlab.inference.observer_data import PublicRecordSource, load_public_record
 
 
@@ -218,6 +221,40 @@ class LightGBMObserver(_BaseObserver):
         )
 
 
+class StrategyReplicationObserver(LightGBMObserver):
+    """LightGBM on price-only reconstructions of the baseline strategies.
+
+    The estimator configuration is inherited unchanged from
+    :class:`LightGBMObserver`; only its feature matrix differs.
+    """
+
+    def __init__(
+        self,
+        config: Mapping[str, Any],
+        *,
+        rng: np.random.Generator,
+        n_estimators: int = 100,
+        learning_rate: float = 0.05,
+        num_leaves: int = 15,
+    ) -> None:
+        if not isinstance(config, Mapping):
+            raise TypeError("config must be a mapping")
+        self.config = config
+        super().__init__(
+            return_lookback=1,
+            rng=rng,
+            n_estimators=n_estimators,
+            learning_rate=learning_rate,
+            num_leaves=num_leaves,
+        )
+
+    def _features(self, episode: TaskCEpisode) -> FloatArray:
+        features = build_strategy_replication_features(
+            episode.public, self.config
+        ).values
+        return np.asarray(features[: len(episode.labels)], dtype=np.float64)
+
+
 def _episode_arrays(
     episode: TaskCEpisode, *, return_lookback: int
 ) -> tuple[FloatArray, BoolArray]:
@@ -251,6 +288,7 @@ __all__ = [
     "DEFAULT_UNWIND_HORIZON",
     "LightGBMObserver",
     "LogisticObserver",
+    "StrategyReplicationObserver",
     "TaskCEpisode",
     "TrivialReferenceObserver",
     "episode_train_test_split",
