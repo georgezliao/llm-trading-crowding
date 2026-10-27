@@ -14,7 +14,7 @@ from herdlab.inference.features import (
     build_strategy_replication_features,
 )
 from herdlab.inference.observer_data import load_public_record
-from herdlab.inference.temporal import GRUObserver
+from herdlab.inference.temporal import GRUEnsembleObserver, GRUObserver
 
 from herdlab.inference.targets import (
     UnwindEpisode,
@@ -35,6 +35,7 @@ __all__ = [
     "LightGBMObserver",
     "LogisticObserver",
     "StrategyReplicationObserver",
+    "GRUEnsembleObserver",
     "GRUObserver",
     "PublicFeatures",
     "TaskCEpisode",

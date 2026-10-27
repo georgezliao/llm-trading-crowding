@@ -203,6 +203,86 @@ class GRUObserver:
         return np.concatenate(windows), np.concatenate(labels)
 
 
+class GRUEnsembleObserver:
+    """Seed-averaged ensemble of independently trained GRU observers.
+
+    One :class:`GRUObserver` is fitted for every seed.  Per-seed predictions
+    remain available for uncertainty reporting, while :meth:`predict_proba`
+    returns their arithmetic mean as the primary ensemble probability.
+    """
+
+    def __init__(
+        self,
+        *,
+        seeds: Sequence[int],
+        return_lookback: int = 10,
+        sequence_length: int = 20,
+        hidden_size: int = 16,
+        learning_rate: float = 1.0e-3,
+        batch_size: int = 512,
+        max_epochs: int = 40,
+        patience: int = 5,
+        min_delta: float = 1.0e-5,
+        validation_fraction: float = 0.2,
+    ) -> None:
+        if not seeds:
+            raise ValueError("seeds must not be empty")
+        self.seeds = tuple(_seed(seed) for seed in seeds)
+        self.return_lookback = return_lookback
+        self.sequence_length = sequence_length
+        self.hidden_size = hidden_size
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.max_epochs = max_epochs
+        self.patience = patience
+        self.min_delta = min_delta
+        self.validation_fraction = validation_fraction
+        self.observers_: tuple[GRUObserver, ...] = ()
+
+    def fit(self, episodes: Sequence[TaskCEpisode]) -> GRUEnsembleObserver:
+        """Fit one independent GRU to ``episodes`` for each configured seed."""
+
+        self.observers_ = tuple(
+            GRUObserver(
+                return_lookback=self.return_lookback,
+                sequence_length=self.sequence_length,
+                hidden_size=self.hidden_size,
+                learning_rate=self.learning_rate,
+                batch_size=self.batch_size,
+                max_epochs=self.max_epochs,
+                patience=self.patience,
+                min_delta=self.min_delta,
+                validation_fraction=self.validation_fraction,
+                seed=seed,
+            ).fit(episodes)
+            for seed in self.seeds
+        )
+        return self
+
+    def predict_proba_per_seed(
+        self, episodes: Sequence[TaskCEpisode]
+    ) -> tuple[tuple[FloatArray, ...], ...]:
+        """Return episode probabilities for each seed, in configured order."""
+
+        if not self.observers_:
+            raise RuntimeError("observer must be fitted before prediction")
+        return tuple(observer.predict_proba(episodes) for observer in self.observers_)
+
+    def predict_proba(self, episodes: Sequence[TaskCEpisode]) -> tuple[FloatArray, ...]:
+        """Return the arithmetic mean of per-seed probabilities by episode."""
+
+        per_seed = self.predict_proba_per_seed(episodes)
+        return tuple(
+            np.mean(
+                np.stack(
+                    [seed_predictions[index] for seed_predictions in per_seed], axis=0
+                ),
+                axis=0,
+            )
+            for index in range(len(episodes))
+        )
+
+
 def _public_episode_array(
     episode: TaskCEpisode, return_lookback: int
 ) -> tuple[FloatArray, NDArray[np.float32]]:
@@ -250,6 +330,15 @@ def _configure_torch(seed: int) -> None:
     torch.manual_seed(seed)
 
 
+def _seed(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise TypeError("seed must be an integer")
+    result = int(value)
+    if not 0 <= result < 2**63:
+        raise ValueError("seed must be in [0, 2**63)")
+    return result
+
+
 def _positive_integer(value: int, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
         raise TypeError(f"{name} must be an integer")
@@ -273,4 +362,4 @@ def _nonnegative_finite(value: float, name: str) -> float:
     return result
 
 
-__all__ = ["GRUObserver"]
+__all__ = ["GRUEnsembleObserver", "GRUObserver"]

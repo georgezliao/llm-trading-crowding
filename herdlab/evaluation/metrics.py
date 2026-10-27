@@ -210,6 +210,81 @@ def episode_bootstrap_metrics(
     return results
 
 
+def paired_pr_auc_difference_ci(
+    labels_by_episode: Sequence[ArrayLike],
+    first_probabilities_by_episode: Sequence[ArrayLike],
+    second_probabilities_by_episode: Sequence[ArrayLike],
+    *,
+    rng: np.random.Generator,
+    n_resamples: int = 1000,
+    confidence: float = 0.95,
+) -> ConfidenceInterval:
+    """Return a paired episode-bootstrap CI for first-minus-second PR-AUC.
+
+    Each bootstrap replicate draws one set of episode indices and applies that
+    same draw to both observers.  This preserves the pairing between their
+    predictions and avoids treating overlapping prediction windows as
+    independent observations.
+    """
+
+    if not isinstance(rng, np.random.Generator):
+        raise TypeError("rng must be a numpy.random.Generator")
+    labels, first_probabilities = _episode_inputs(
+        labels_by_episode, first_probabilities_by_episode
+    )
+    _, second_probabilities = _episode_inputs(
+        labels_by_episode, second_probabilities_by_episode
+    )
+    if (
+        isinstance(n_resamples, bool)
+        or not isinstance(n_resamples, (int, np.integer))
+        or n_resamples <= 0
+    ):
+        raise ValueError("n_resamples must be a positive integer")
+    level = float(confidence)
+    if not np.isfinite(level) or not 0.0 < level < 1.0:
+        raise ValueError("confidence must be between zero and one")
+
+    pooled_labels = np.concatenate(labels)
+    estimate = pr_auc(
+        pooled_labels, np.concatenate(first_probabilities)
+    ) - pr_auc(pooled_labels, np.concatenate(second_probabilities))
+
+    samples = np.empty(int(n_resamples), dtype=np.float64)
+    sample_index = 0
+    attempts = 0
+    max_attempts = max(100, int(n_resamples) * 100)
+    while sample_index < int(n_resamples) and attempts < max_attempts:
+        attempts += 1
+        selected = rng.integers(0, len(labels), size=len(labels))
+        sample_labels = np.concatenate([labels[index] for index in selected])
+        first_sample = np.concatenate(
+            [first_probabilities[index] for index in selected]
+        )
+        second_sample = np.concatenate(
+            [second_probabilities[index] for index in selected]
+        )
+        try:
+            first_value = pr_auc(sample_labels, first_sample)
+            second_value = pr_auc(sample_labels, second_sample)
+        except ValueError:
+            # Redraw whole paired episode samples when PR-AUC is undefined.
+            continue
+        difference = first_value - second_value
+        if not np.isfinite(difference):
+            continue
+        samples[sample_index] = difference
+        sample_index += 1
+    if sample_index < int(n_resamples):
+        raise ValueError("PR-AUC is undefined for too many bootstrap resamples")
+
+    alpha = (1.0 - level) / 2.0
+    lower, upper = np.quantile(samples, [alpha, 1.0 - alpha])
+    return ConfidenceInterval(
+        estimate=float(estimate), lower=float(lower), upper=float(upper)
+    )
+
+
 def _undefined_interval() -> ConfidenceInterval:
     """Represent a class-dependent metric that the observed labels do not define."""
 
@@ -265,6 +340,7 @@ __all__ = [
     "brier_score",
     "episode_bootstrap_ci",
     "episode_bootstrap_metrics",
+    "paired_pr_auc_difference_ci",
     "pr_auc",
     "recall_at_false_alarm_rate",
     "recall_at_fixed_false_alarm_rate",

@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from herdlab.inference.baselines import TaskCEpisode
-from herdlab.inference.temporal import GRUObserver
+from herdlab.inference.temporal import GRUEnsembleObserver, GRUObserver
 from herdlab.market.records import PublicRecord
 
 
@@ -111,3 +111,29 @@ def test_gru_fit_is_deterministic_for_a_fixed_seed() -> None:
         np.testing.assert_array_equal(left, right)
     assert first.epochs_trained_ == second.epochs_trained_
     assert first.best_validation_loss_ == second.best_validation_loss_
+
+
+def test_gru_ensemble_equals_mean_of_per_seed_probabilities() -> None:
+    training = tuple(_episode(index) for index in range(4))
+    evaluation = (_episode(40), _episode(41))
+    ensemble = GRUEnsembleObserver(
+        seeds=(21, 22),
+        return_lookback=3,
+        sequence_length=4,
+        hidden_size=5,
+        learning_rate=0.01,
+        batch_size=16,
+        max_epochs=8,
+        patience=3,
+        validation_fraction=0.25,
+    ).fit(training)
+
+    per_seed = ensemble.predict_proba_per_seed(evaluation)
+    averaged = ensemble.predict_proba(evaluation)
+
+    assert tuple(observer.seed for observer in ensemble.observers_) == (21, 22)
+    for episode_index, probabilities in enumerate(averaged):
+        expected = np.mean(
+            np.stack([prediction[episode_index] for prediction in per_seed]), axis=0
+        )
+        np.testing.assert_array_equal(probabilities, expected)

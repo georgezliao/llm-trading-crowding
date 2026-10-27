@@ -9,6 +9,7 @@ from herdlab.evaluation.metrics import (
     brier_score,
     episode_bootstrap_ci,
     episode_bootstrap_metrics,
+    paired_pr_auc_difference_ci,
     pr_auc,
     recall_at_false_alarm_rate,
 )
@@ -68,3 +69,20 @@ def test_bootstrap_reports_undefined_class_metrics_when_no_events() -> None:
     assert np.isnan(metrics["pr_auc"].estimate)
     assert np.isnan(metrics["recall_at_false_alarm_rate"].estimate)
     assert metrics["brier"].estimate == pytest.approx(0.022)
+
+
+def test_paired_pr_auc_difference_is_exactly_zero_for_identical_predictions() -> None:
+    labels = [np.asarray([0, 1, 0]), np.asarray([1, 0, 1])]
+    probabilities = [np.asarray([0.1, 0.8, 0.3]), np.asarray([0.7, 0.2, 0.9])]
+
+    result = paired_pr_auc_difference_ci(
+        labels,
+        probabilities,
+        probabilities,
+        rng=np.random.default_rng(12),
+        n_resamples=100,
+    )
+
+    assert result.estimate == 0.0
+    assert result.lower == 0.0
+    assert result.upper == 0.0
