@@ -17,3 +17,4 @@ docs/reports/*
 !docs/reports/experiment_zero_v2.md
 !docs/reports/experiment_zero_round3.md
 !docs/reports/experiment_zero_round4.md
+!docs/reports/overlap_sweep.md
