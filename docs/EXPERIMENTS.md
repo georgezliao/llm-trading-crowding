@@ -152,3 +152,21 @@ Fixed setting: `configs/experiment_zero.yaml` (impact 0.03, leverage ×20, drawd
    - *H1 is supported in this simulator* if the episode-bootstrap CI of the OLS slope of episode mean C^pos on ω lies above 0, and the event-rate slope CI also lies above 0. If only the C^pos slope is positive, the report says that overlap raises alignment without raising unwinds.
    - Forced-flow results with fewer than 30 test events are reported as underpowered.
 6. No ρ, β, ω, seed range, threshold rule or observer hyperparameter is changed after viewing round-4 metrics. If total runtime would exceed about 60 minutes, the run stops and reports instead of cutting episodes.
+
+### 2026-10-28: round-4 private-information, ablation, and overlap results (simulator evidence only)
+
+- **Simulator evidence only:** all results are from the uncalibrated synthetic HerdLab model, not real markets, funds, or live trading.
+- Default-label test base rates were 0.049959, 0.053061, 0.054776, and 0.054898 at ρ = 0, 0.1, 0.25, and 0.5, so every default condition cleared the pre-registered 1% informativeness floor.
+- GRU-ensemble default PR-AUC was 0.9564 [0.9355, 0.9694] at ρ = 0 and 0.3158 [0.2801, 0.3511] at ρ = 0.5; the corresponding trivial-reference values were 0.0897 [0.0528, 0.1324] and 0.0738 [0.0654, 0.0843].
+- The jointly resampled degradation statistic, [(GRU − trivial) at ρ = 0] − [(GRU − trivial) at ρ = 0.5], was 0.6246 [0.5803, 0.6632]; private information therefore degraded inference by the pre-registered rule.
+- GRU-minus-replicator default-label CIs excluded zero above at every ρ: estimates were 0.8733, 0.1509, 0.1850, and 0.2076, so none was reported as consistent with strategy replication by that rule.
+- Liquidity was the only default-label feature group reported as used: full-minus-ablated PR-AUC was 0.0072 [0.0040, 0.0106] for LightGBM and 0.0084 [0.0041, 0.0137] for GRU seed 6000.
+- Order flow, volatility, and volume were not reported as used for the default label by either observer; no feature group met the use rule for forced flow.
+- Forced-flow test base rates were 0.062000 at ρ = 0 but only 0.000571, 0, and 0.000571 at ρ = 0.1, 0.25, and 0.5.
+- Only ρ = 0 forced flow met the 30-event power rule (1,519 events); ρ = 0.1, 0.25, 0.5, impact-off, and risk-off had 14, 0, 14, 24, and 0 events and were underpowered.
+- With impact off, default-label base rate was 0.048000 and GRU PR-AUC was 0.2594 [0.2198, 0.2982]; with risk off they were 0.049918 and 0.9516 [0.9280, 0.9651].
+- In the overlap sweep, mean C^pos rose from 0.24687875 at ω = 0 to 0.83329869 at ω = 1, while default-label event rate rose from 0.00034014 to 0.14163265.
+- The C^pos slope was 0.5641311472 [0.5573096332, 0.5708205978] and the event-rate slope was 0.1421496599 [0.1342034014, 0.1498231293]; both CIs lay above zero, so H1 was supported in this simulator by the pre-registered rule.
+- Maximum price drawdown also rose from 0.10941507 to 0.21288511 across the overlap endpoints, but forced-order fractions were zero except 0.00001111 at ω = 0.
+- These runs show that added private information weakens the public observer under the fixed degradation comparison, and that mechanically increased learned-agent overlap raises alignment and the broad agent-selling event rate in this simulator.
+- They do not show that overlap produced forced-liquidation cascades, identify causal mechanisms behind the observer scores, establish transfer beyond this simulator, or provide evidence about real-market crowding.
