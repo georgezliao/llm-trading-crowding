@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Mapping
 import numpy as np
 from numpy.typing import NDArray
 
+from herdlab.agents.overlap import learned_overlap_mode
+
 if TYPE_CHECKING:
     from herdlab.market.exogenous import ExogenousPath
 
@@ -100,7 +102,21 @@ def generate_private_signals(
     standardized_return = exogenous_returns / step_volatility
     if not np.all(np.isfinite(standardized_return)):
         raise ValueError("standardized exogenous returns must be finite")
-    noise = rng.normal(0.0, 1.0, size=(n_steps, agent_count))
+    mode = learned_overlap_mode(config)
+    if mode == "none":
+        # Preserve the round-3/R4-1 signal draw exactly in the default mode.
+        noise = rng.normal(0.0, 1.0, size=(n_steps, agent_count))
+    else:
+        agents = config["agents"] if "agents" in config else config
+        overlap = float(agents["feature_overlap"])
+        if not np.isfinite(overlap) or not 0.0 <= overlap <= 1.0:
+            raise ValueError("agents.feature_overlap must be finite and in [0, 1]")
+        common = rng.normal(0.0, 1.0, size=n_steps)
+        idiosyncratic = rng.normal(0.0, 1.0, size=(n_steps, agent_count))
+        noise = (
+            np.sqrt(overlap) * common[:, None]
+            + np.sqrt(1.0 - overlap) * idiosyncratic
+        )
     residual_scale = np.sqrt(1.0 - settings.strength**2)
     return (
         settings.strength * standardized_return[:, None]

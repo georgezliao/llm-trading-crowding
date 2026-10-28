@@ -38,6 +38,7 @@ agents:
   epsilon: 1.0e-08
   parameter_dispersion: 0.1
   feature_overlap: 0.5
+  learned_overlap_mode: none
   private_signal:
     strength: 0.0
     beta: 1.0

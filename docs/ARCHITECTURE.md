@@ -50,6 +50,33 @@ Optional constraints: position limits, execution costs, delay, max participation
 
 Signals are serialized only in `PrivateRecord`, alongside per-agent positions, orders, risk state, and labels. `PublicRecord`, `PublicObservation`, the strict observer loader, and observer feature builders have no signal field.
 
+`agents.learned_overlap_mode` is `none` by default. In that mode the linear,
+GBDT and MLP input paths and the private-signal RNG draw order are unchanged
+from round 3. The optional `lag_weights` mode extends the factor-agent overlap
+construction to every learned agent. For population-shared positive lag scores
+`a` and agent-specific scores `b_i`, learned agent i receives normalized lag
+weights
+
+- w_i = normalize(ω a + (1−ω) b_i), where ω is `feature_overlap`,
+
+using the same trim/pad and log-normal score rules as factor `_lag_weights`.
+Each causal lagged-return input vector, both in rolling training examples and
+at prediction time, is multiplied elementwise by w_i. One shared score vector
+is reused across the linear, GBDT and MLP families; their configured lookbacks
+select the corresponding trailing scores.
+
+When private signals are enabled in `lag_weights` mode, their noise is also
+split by overlap:
+
+- ε_{i,t} = sqrt(ω) ε^common_t + sqrt(1−ω) ε^idio_{i,t}.
+
+Thus ω = 1 gives identical learned lag weights (for equal lookbacks) and
+identical signal-noise paths across agents, while ω = 0 gives independent
+idiosyncratic noise. Complete signals at ω = 0 can still be correlated through
+the common predictive term ρ z_{t+1}. The common and idiosyncratic draws use
+the existing private-signal RNG stream and remain deterministic per episode
+seed.
+
 Risk management is required. On breaching a drawdown or margin threshold, an agent reduces exposure to zero over `liquidation_steps` decisions. The completed schedule is followed by `cooldown_steps` decisions with zero target exposure; strategy orders resume after the cooldown and the drawdown peak resets to current equity at that point. A risk-overridden order is marked forced only when its quantity is nonzero. Without forced reduction, synchronized forced selling cannot appear.
 
 ## Market simulator

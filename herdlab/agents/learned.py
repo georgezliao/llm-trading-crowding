@@ -10,7 +10,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from herdlab.agents.base import Agent, PublicObservation
-from herdlab.agents.factor import build_factor_population
+from herdlab.agents.factor import (
+    _lag_weights,
+    _validated_weights,
+    build_factor_population,
+)
+from herdlab.agents.overlap import learned_overlap_mode
 
 
 FloatArray = NDArray[np.float64]
@@ -38,6 +43,7 @@ class LinearMLAgent(Agent):
         refit_interval: int,
         training_window: int,
         min_samples: int,
+        lag_weights: FloatArray | None = None,
         **kwargs: float,
     ) -> None:
         super().__init__(**kwargs)
@@ -57,6 +63,11 @@ class LinearMLAgent(Agent):
         self.refit_interval = int(refit_interval)
         self.training_window = int(training_window)
         self.min_samples = int(min_samples)
+        self.lag_weights = (
+            None
+            if lag_weights is None
+            else _validated_weights(lag_weights, self.lookback)
+        )
         self._coefficients = np.zeros(self.lookback, dtype=np.float64)
         self._intercept = 0.0
         self._last_fit_step: int | None = None
@@ -82,7 +93,9 @@ class LinearMLAgent(Agent):
 
     def forecast(self, observation: PublicObservation) -> float:
         history = _validated_history(observation.returns)
-        features, targets = _lagged_examples(history, self.lookback)
+        features, targets = _lagged_examples(
+            history, self.lookback, self.lag_weights
+        )
         should_refit = (
             targets.size >= self.min_samples
             and (
@@ -96,7 +109,9 @@ class LinearMLAgent(Agent):
 
         if history.size < self.lookback or self._last_fit_step is None:
             return 0.0
-        current = history[-self.lookback :]
+        current = _weighted_lag_inputs(
+            history[-self.lookback :], self.lag_weights
+        )
         return float(self._intercept + current @ self._coefficients)
 
     def _fit(self, features: FloatArray, targets: FloatArray) -> None:
@@ -130,6 +145,7 @@ class LightGBMAgent(Agent):
         learning_rate: float,
         num_leaves: int,
         random_seed: int,
+        lag_weights: FloatArray | None = None,
         **kwargs: float,
     ) -> None:
         super().__init__(**kwargs)
@@ -151,6 +167,11 @@ class LightGBMAgent(Agent):
         self.learning_rate = float(learning_rate)
         self.num_leaves = int(num_leaves)
         self.random_seed = int(random_seed)
+        self.lag_weights = (
+            None
+            if lag_weights is None
+            else _validated_weights(lag_weights, self.lookback)
+        )
         self._model: lgb.LGBMRegressor | None = None
         self._last_fit_step: int | None = None
         self._fit_sample_count = 0
@@ -165,7 +186,9 @@ class LightGBMAgent(Agent):
 
     def forecast(self, observation: PublicObservation) -> float:
         history = _validated_history(observation.returns)
-        features, targets = _lagged_examples(history, self.lookback)
+        features, targets = _lagged_examples(
+            history, self.lookback, self.lag_weights
+        )
         if _should_refit(
             targets.size,
             self.min_samples,
@@ -180,7 +203,10 @@ class LightGBMAgent(Agent):
 
         if history.size < self.lookback or self._model is None:
             return 0.0
-        prediction = self._model.predict(history[-self.lookback :].reshape(1, -1))
+        current = _weighted_lag_inputs(
+            history[-self.lookback :], self.lag_weights
+        )
+        prediction = self._model.predict(current.reshape(1, -1))
         return float(prediction[0])
 
     def _fit(self, features: FloatArray, targets: FloatArray) -> None:
@@ -219,6 +245,7 @@ class MLPAgent(Agent):
         learning_rate: float,
         l2: float,
         rng: np.random.Generator,
+        lag_weights: FloatArray | None = None,
         **kwargs: float,
     ) -> None:
         super().__init__(**kwargs)
@@ -242,6 +269,11 @@ class MLPAgent(Agent):
         self.epochs = int(epochs)
         self.learning_rate = float(learning_rate)
         self.l2 = float(l2)
+        self.lag_weights = (
+            None
+            if lag_weights is None
+            else _validated_weights(lag_weights, self.lookback)
+        )
         self._rng = rng
         self._weights_1: FloatArray | None = None
         self._bias_1: FloatArray | None = None
@@ -264,7 +296,9 @@ class MLPAgent(Agent):
 
     def forecast(self, observation: PublicObservation) -> float:
         history = _validated_history(observation.returns)
-        features, targets = _lagged_examples(history, self.lookback)
+        features, targets = _lagged_examples(
+            history, self.lookback, self.lag_weights
+        )
         if _should_refit(
             targets.size,
             self.min_samples,
@@ -279,7 +313,10 @@ class MLPAgent(Agent):
 
         if history.size < self.lookback or self._weights_1 is None:
             return 0.0
-        current = (history[-self.lookback :] - self._feature_mean) / self._feature_scale
+        current_lags = _weighted_lag_inputs(
+            history[-self.lookback :], self.lag_weights
+        )
+        current = (current_lags - self._feature_mean) / self._feature_scale
         hidden = np.tanh(current @ self._weights_1 + self._bias_1)
         scaled_prediction = float(hidden @ self._weights_2 + self._bias_2)
         return self._target_mean + self._target_scale * scaled_prediction
@@ -326,7 +363,10 @@ class MLPAgent(Agent):
 
 
 def build_linear_population(
-    config: Mapping[str, Any], rng: np.random.Generator
+    config: Mapping[str, Any],
+    rng: np.random.Generator,
+    *,
+    shared_lag_scores: FloatArray | None = None,
 ) -> list[LinearMLAgent]:
     """Build the configured linear-agent family using the supplied RNG."""
 
@@ -339,9 +379,20 @@ def build_linear_population(
     dispersion = float(agents["parameter_dispersion"])
     if dispersion < 0.0 or not np.isfinite(dispersion):
         raise ValueError("agents.parameter_dispersion must be finite and nonnegative")
+    mode = learned_overlap_mode(agents)
+    shared_lag_scores = _resolve_shared_lag_scores(
+        agents, rng, mode, shared_lag_scores
+    )
 
     population: list[LinearMLAgent] = []
     for _ in range(count):
+        lag_weights = _learned_lag_weights(
+            int(learned["lookback"]),
+            agents,
+            rng,
+            mode,
+            shared_lag_scores,
+        )
         population.append(
             LinearMLAgent(
                 lookback=int(learned["lookback"]),
@@ -349,6 +400,7 @@ def build_linear_population(
                 refit_interval=int(learned["refit_interval"]),
                 training_window=int(learned["training_window"]),
                 min_samples=int(learned["min_samples"]),
+                lag_weights=lag_weights,
                 q_max=_disperse(float(agents["q_max"]), dispersion, rng),
                 k=_disperse(float(agents["risk_aversion_k"]), dispersion, rng),
                 u_max=_disperse(float(agents["order_limit"]), dispersion, rng),
@@ -359,7 +411,10 @@ def build_linear_population(
 
 
 def build_gbdt_population(
-    config: Mapping[str, Any], rng: np.random.Generator
+    config: Mapping[str, Any],
+    rng: np.random.Generator,
+    *,
+    shared_lag_scores: FloatArray | None = None,
 ) -> list[LightGBMAgent]:
     """Build the configured LightGBM family using deterministic agent seeds."""
 
@@ -367,8 +422,19 @@ def build_gbdt_population(
     learned = agents.get("gbdt", {})
     count = _nonnegative_count(learned, "gbdt")
     dispersion = _validated_dispersion(agents)
+    mode = learned_overlap_mode(agents)
+    shared_lag_scores = _resolve_shared_lag_scores(
+        agents, rng, mode, shared_lag_scores
+    )
     population: list[LightGBMAgent] = []
     for _ in range(count):
+        lag_weights = _learned_lag_weights(
+            int(learned["lookback"]),
+            agents,
+            rng,
+            mode,
+            shared_lag_scores,
+        )
         population.append(
             LightGBMAgent(
                 lookback=int(learned["lookback"]),
@@ -379,6 +445,7 @@ def build_gbdt_population(
                 learning_rate=float(learned["learning_rate"]),
                 num_leaves=int(learned["num_leaves"]),
                 random_seed=int(rng.integers(0, np.iinfo(np.int32).max)),
+                lag_weights=lag_weights,
                 q_max=_disperse(float(agents["q_max"]), dispersion, rng),
                 k=_disperse(float(agents["risk_aversion_k"]), dispersion, rng),
                 u_max=_disperse(float(agents["order_limit"]), dispersion, rng),
@@ -389,7 +456,10 @@ def build_gbdt_population(
 
 
 def build_mlp_population(
-    config: Mapping[str, Any], rng: np.random.Generator
+    config: Mapping[str, Any],
+    rng: np.random.Generator,
+    *,
+    shared_lag_scores: FloatArray | None = None,
 ) -> list[MLPAgent]:
     """Build the configured small NumPy-MLP family."""
 
@@ -397,8 +467,19 @@ def build_mlp_population(
     learned = agents.get("mlp", {})
     count = _nonnegative_count(learned, "mlp")
     dispersion = _validated_dispersion(agents)
+    mode = learned_overlap_mode(agents)
+    shared_lag_scores = _resolve_shared_lag_scores(
+        agents, rng, mode, shared_lag_scores
+    )
     population: list[MLPAgent] = []
     for _ in range(count):
+        lag_weights = _learned_lag_weights(
+            int(learned["lookback"]),
+            agents,
+            rng,
+            mode,
+            shared_lag_scores,
+        )
         model_rng = np.random.default_rng(
             int(rng.integers(0, np.iinfo(np.int64).max))
         )
@@ -413,6 +494,7 @@ def build_mlp_population(
                 learning_rate=float(learned["learning_rate"]),
                 l2=float(learned["l2"]),
                 rng=model_rng,
+                lag_weights=lag_weights,
                 q_max=_disperse(float(agents["q_max"]), dispersion, rng),
                 k=_disperse(float(agents["risk_aversion_k"]), dispersion, rng),
                 u_max=_disperse(float(agents["order_limit"]), dispersion, rng),
@@ -441,6 +523,9 @@ def build_population(config: Mapping[str, Any], rng: np.random.Generator) -> lis
             f"({configured_total} != {total})"
         )
 
+    mode = learned_overlap_mode(agents)
+    shared_lag_scores = _resolve_shared_lag_scores(agents, rng, mode, None)
+
     factor_config = deepcopy(dict(config))
     factor_count = momentum_count + reversion_count
     if "agents" in config:
@@ -458,9 +543,17 @@ def build_population(config: Mapping[str, Any], rng: np.random.Generator) -> lis
     population: list[Agent] = []
     if factor_count:
         population.extend(build_factor_population(factor_config, rng))
-    population.extend(build_linear_population(config, rng))
-    population.extend(build_gbdt_population(config, rng))
-    population.extend(build_mlp_population(config, rng))
+    population.extend(
+        build_linear_population(
+            config, rng, shared_lag_scores=shared_lag_scores
+        )
+    )
+    population.extend(
+        build_gbdt_population(config, rng, shared_lag_scores=shared_lag_scores)
+    )
+    population.extend(
+        build_mlp_population(config, rng, shared_lag_scores=shared_lag_scores)
+    )
     return population
 
 
@@ -512,12 +605,77 @@ def _validated_history(returns: FloatArray) -> FloatArray:
     return history
 
 
-def _lagged_examples(history: FloatArray, lookback: int) -> tuple[FloatArray, FloatArray]:
+def _lagged_examples(
+    history: FloatArray,
+    lookback: int,
+    lag_weights: FloatArray | None = None,
+) -> tuple[FloatArray, FloatArray]:
     sample_count = max(0, history.size - lookback)
     features = np.empty((sample_count, lookback), dtype=np.float64)
     for row, target_index in enumerate(range(lookback, history.size)):
-        features[row] = history[target_index - lookback : target_index]
+        features[row] = _weighted_lag_inputs(
+            history[target_index - lookback : target_index], lag_weights
+        )
     return features, history[lookback:].copy()
+
+
+def _weighted_lag_inputs(
+    values: FloatArray, lag_weights: FloatArray | None
+) -> FloatArray:
+    if lag_weights is None:
+        return values
+    return values * lag_weights
+
+
+def _resolve_shared_lag_scores(
+    agents: Mapping[str, Any],
+    rng: np.random.Generator,
+    mode: str,
+    shared_lag_scores: FloatArray | None,
+) -> FloatArray | None:
+    if mode == "none":
+        return None
+    if shared_lag_scores is not None:
+        return shared_lag_scores
+
+    lookbacks = [
+        int(agents[family]["lookback"])
+        for family in ("linear", "gbdt", "mlp")
+        if _nonnegative_count(agents.get(family, {}), family) > 0
+    ]
+    if not lookbacks:
+        return np.empty(0, dtype=np.float64)
+    dispersion = _validated_dispersion(agents)
+    if dispersion == 0.0:
+        return np.ones(max(lookbacks), dtype=np.float64)
+    return rng.lognormal(
+        mean=-0.5 * dispersion**2,
+        sigma=dispersion,
+        size=max(lookbacks),
+    )
+
+
+def _learned_lag_weights(
+    lookback: int,
+    agents: Mapping[str, Any],
+    rng: np.random.Generator,
+    mode: str,
+    shared_lag_scores: FloatArray | None,
+) -> FloatArray | None:
+    if mode == "none":
+        return None
+    if shared_lag_scores is None or shared_lag_scores.size == 0:
+        raise ValueError("shared lag scores are required in lag_weights mode")
+    overlap = float(agents["feature_overlap"])
+    if not np.isfinite(overlap) or not 0.0 <= overlap <= 1.0:
+        raise ValueError("agents.feature_overlap must be finite and in [0, 1]")
+    return _lag_weights(
+        lookback,
+        shared_lag_scores,
+        overlap,
+        _validated_dispersion(agents),
+        rng,
+    )
 
 
 def _disperse(base: float, dispersion: float, rng: np.random.Generator) -> float:

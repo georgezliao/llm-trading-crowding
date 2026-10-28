@@ -33,6 +33,7 @@ def test_zero_strength_matches_round3_episode_bit_identically() -> None:
     config = _config(n_steps=50)
     round3_config = deepcopy(config)
     del round3_config["agents"]["private_signal"]
+    del round3_config["agents"]["learned_overlap_mode"]
     seed = 8341
 
     exogenous_seed, agent_seed = np.random.SeedSequence(seed).spawn(2)
