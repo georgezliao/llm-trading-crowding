@@ -15,6 +15,11 @@ from herdlab.agents.learned import (
     build_mlp_population,
     build_population,
 )
+from herdlab.agents.private_signal import (
+    PrivateSignalConfig,
+    generate_private_signals,
+    private_signal_config,
+)
 from herdlab.agents.risk import OrderDecision, RiskLimits, RiskManager
 
 __all__ = [
@@ -25,6 +30,7 @@ __all__ = [
     "MeanReversionAgent",
     "MomentumAgent",
     "OrderDecision",
+    "PrivateSignalConfig",
     "PublicObservation",
     "RiskLimits",
     "RiskManager",
@@ -33,4 +39,6 @@ __all__ = [
     "build_linear_population",
     "build_mlp_population",
     "build_population",
+    "generate_private_signals",
+    "private_signal_config",
 ]

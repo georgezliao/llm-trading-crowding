@@ -39,10 +39,16 @@ Each agent gets common market features plus agent-specific data and parameters; 
 Decision model for agent i at time t:
 
 - Forecast: r̂_{i,t+1} = f_{θ_i}(X_{≤t})
-- Target exposure: q*_{i,t} = q_i^max · tanh( r̂_{i,t+1} / (k_i σ̂_t + ε) )
+- Optional private signal: s_{i,t} = ρ z_{t+1} + sqrt(1−ρ²) ε_{i,t}, where z_{t+1} is the next exogenous return divided by its configured regime volatility and ε_{i,t} is agent-specific N(0,1) noise.
+- Adjusted forecast: r̂'_{i,t+1} = r̂_{i,t+1} + β σ̂_t s_{i,t}. This adjustment is applied to every agent family before the common exposure rule.
+- Target exposure: q*_{i,t} = q_i^max · tanh( r̂'_{i,t+1} / (k_i σ̂_t + ε) )
 - Order: u_{i,t} = clip( q*_{i,t} − q_{i,t}, −u_i^max, u_i^max )
 
 Optional constraints: position limits, execution costs, delay, max participation in volume.
+
+`agents.private_signal` configures `strength` (ρ), `beta`, and a `rng_stream` index. Episode seed streams 0 and 1 remain the exogenous-path and population-construction streams; the private signal uses its configured independent stream (2 by default). At ρ = 0 signal generation is bypassed, exact zeros are recorded, and the round-3 decision path is retained bit-for-bit. Signal row t is aligned with the decision at t and uses the exogenous innovation entering r_{t+1}, making this deliberately private predictive information rather than a public causal feature.
+
+Signals are serialized only in `PrivateRecord`, alongside per-agent positions, orders, risk state, and labels. `PublicRecord`, `PublicObservation`, the strict observer loader, and observer feature builders have no signal field.
 
 Risk management is required. On breaching a drawdown or margin threshold, an agent reduces exposure to zero over `liquidation_steps` decisions. The completed schedule is followed by `cooldown_steps` decisions with zero target exposure; strategy orders resume after the cooldown and the drawdown peak resets to current equity at that point. A risk-overridden order is marked forced only when its quantity is nonzero. Without forced reduction, synchronized forced selling cannot appear.
 

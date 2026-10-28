@@ -72,6 +72,7 @@ class PrivateRecord:
     agent_net_flow: FloatArray
     position_crowding: FloatArray
     flow_crowding: FloatArray
+    signals: FloatArray | None = None
 
     def __post_init__(self) -> None:
         state_arrays = (self.positions, self.cash, self.equity)
@@ -119,6 +120,18 @@ class PrivateRecord:
                 raise ValueError(f"{name} must be finite and in [0, 1]")
         if np.any(self.transaction_costs < 0.0):
             raise ValueError("transaction_costs must be nonnegative")
+        if self.signals is None:
+            object.__setattr__(
+                self, "signals", np.zeros((n_steps, n_agents), dtype=np.float64)
+            )
+        else:
+            signals = np.asarray(self.signals)
+            if signals.shape != (n_steps, n_agents):
+                raise ValueError("signals must have shape (steps, agents)")
+            if not np.issubdtype(signals.dtype, np.number) or not np.all(
+                np.isfinite(signals)
+            ):
+                raise ValueError("signals must be numeric and finite")
 
 
 def split_simulation_records(
@@ -177,6 +190,7 @@ def split_simulation_records(
         agent_net_flow=agent_net_flow.copy(),
         position_crowding=position_crowding(result.positions),
         flow_crowding=flow_crowding(result.orders),
+        signals=np.asarray(result.signals, dtype=np.float64).copy(),
     )
     return public, private
 

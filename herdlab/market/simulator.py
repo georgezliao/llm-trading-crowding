@@ -24,6 +24,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from herdlab.agents.base import Agent, PublicObservation
+from herdlab.agents.private_signal import private_signal_config
 from herdlab.agents.risk import RiskLimits, RiskManager
 from herdlab.market.exogenous import ExogenousPath
 from herdlab.market.impact import ImpactFunction, LinearImpact, SignedPowerImpact
@@ -55,6 +56,7 @@ class SimulationResult:
     cash: FloatArray
     equity: FloatArray
     leverage: FloatArray
+    signals: FloatArray
 
 
 class MarketSimulator:
@@ -66,6 +68,7 @@ class MarketSimulator:
         agents: Sequence[Agent],
         *,
         impact_function: ImpactFunction | None = None,
+        private_signals: FloatArray | None = None,
     ) -> None:
         if not agents:
             raise ValueError("agents must not be empty")
@@ -79,6 +82,8 @@ class MarketSimulator:
         if not np.isfinite(self.impact_sensitivity) or self.impact_sensitivity < 0.0:
             raise ValueError("market.impact_sensitivity must be finite and nonnegative")
         self.impact_function = impact_function or _impact_from_config(market)
+        self.private_signal = private_signal_config(config)
+        self._private_signals = private_signals
         limits = RiskLimits.from_config(config)
         self.risk_managers = [RiskManager(limits) for _ in self.agents]
         self.volatility_lookback = int(config["simulation"]["realized_vol_lookback"])
@@ -94,6 +99,12 @@ class MarketSimulator:
             raise ValueError("exogenous path length must equal simulation.n_steps")
 
         n_agents = len(self.agents)
+        signals = _validated_private_signals(
+            self._private_signals,
+            strength=self.private_signal.strength,
+            n_steps=n_steps,
+            n_agents=n_agents,
+        )
         prices = np.empty(n_steps + 1, dtype=np.float64)
         returns = np.empty(n_steps, dtype=np.float64)
         fill_prices = np.empty(n_steps, dtype=np.float64)
@@ -134,7 +145,19 @@ class MarketSimulator:
             for index, (agent, risk_manager) in enumerate(
                 zip(self.agents, self.risk_managers, strict=True)
             ):
-                strategy_order = agent.decide(observation)
+                if self.private_signal.strength == 0.0:
+                    # Preserve the round-3 decision call exactly when private
+                    # information is switched off.
+                    strategy_order = agent.decide(observation)
+                else:
+                    adjustment = (
+                        self.private_signal.beta
+                        * realized_volatility
+                        * signals[step, index]
+                    )
+                    strategy_order = agent.decide(
+                        observation, forecast_adjustment=float(adjustment)
+                    )
                 decision = risk_manager.apply(
                     strategy_order,
                     position=float(positions[step, index]),
@@ -187,6 +210,7 @@ class MarketSimulator:
             cash=cash,
             equity=equity,
             leverage=leverage,
+            signals=signals,
         )
 
     def run_records(
@@ -208,11 +232,15 @@ def simulate_market(
     exogenous: ExogenousPath,
     *,
     impact_function: ImpactFunction | None = None,
+    private_signals: FloatArray | None = None,
 ) -> SimulationResult:
     """Convenience wrapper around :class:`MarketSimulator`."""
 
     return MarketSimulator(
-        config, agents, impact_function=impact_function
+        config,
+        agents,
+        impact_function=impact_function,
+        private_signals=private_signals,
     ).run(exogenous)
 
 
@@ -222,11 +250,15 @@ def simulate_market_records(
     exogenous: ExogenousPath,
     *,
     impact_function: ImpactFunction | None = None,
+    private_signals: FloatArray | None = None,
 ) -> tuple[PublicRecord, PrivateRecord]:
     """Run one episode and return only the explicitly separated records."""
 
     return MarketSimulator(
-        config, agents, impact_function=impact_function
+        config,
+        agents,
+        impact_function=impact_function,
+        private_signals=private_signals,
     ).run_records(exogenous)
 
 
@@ -270,6 +302,32 @@ def _validate_exogenous(exogenous: ExogenousPath) -> int:
     if np.any(exogenous.liquidity <= 0.0):
         raise ValueError("exogenous liquidity must be positive")
     return next(iter(lengths))
+
+
+def _validated_private_signals(
+    signals: FloatArray | None,
+    *,
+    strength: float,
+    n_steps: int,
+    n_agents: int,
+) -> FloatArray:
+    expected_shape = (n_steps, n_agents)
+    if signals is None:
+        if strength > 0.0:
+            raise ValueError(
+                "private_signals are required when agents.private_signal.strength "
+                "is positive"
+            )
+        return np.zeros(expected_shape, dtype=np.float64)
+
+    values = np.asarray(signals, dtype=np.float64)
+    if values.shape != expected_shape:
+        raise ValueError(f"private_signals must have shape {expected_shape}")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("private_signals must be finite")
+    if strength == 0.0 and np.any(values != 0.0):
+        raise ValueError("private_signals must be zero when signal strength is zero")
+    return values.copy()
 
 
 def _realized_volatility(returns: FloatArray, lookback: int) -> float:

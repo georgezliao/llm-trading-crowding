@@ -75,16 +75,25 @@ class Agent(ABC):
         scaled_forecast = forecast / (self.k * volatility + self.epsilon)
         return float(self.q_max * np.tanh(scaled_forecast))
 
-    def decide(self, observation: PublicObservation) -> float:
+    def decide(
+        self,
+        observation: PublicObservation,
+        *,
+        forecast_adjustment: float = 0.0,
+    ) -> float:
         """Return the clipped order implied by the agent's current position.
 
         Calling this method does not assume execution or mutate the position.
         The simulator records an executed fill separately with
-        :meth:`apply_fill`.
+        :meth:`apply_fill`.  ``forecast_adjustment`` is private agent input;
+        it is added after the family forecast and before the shared tanh rule.
         """
 
+        if not np.isfinite(forecast_adjustment):
+            raise ValueError("forecast_adjustment must be finite")
         target = self.target_position(
-            self.forecast(observation), observation.realized_volatility
+            self.forecast(observation) + forecast_adjustment,
+            observation.realized_volatility,
         )
         return float(np.clip(target - self.position, -self.u_max, self.u_max))
 
