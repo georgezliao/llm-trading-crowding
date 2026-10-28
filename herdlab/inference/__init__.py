@@ -9,6 +9,8 @@ from herdlab.inference.baselines import (
     split_episodes,
 )
 from herdlab.inference.features import (
+    FEATURE_GROUP_COLUMNS,
+    FeatureGroup,
     PublicFeatures,
     build_public_features,
     build_strategy_replication_features,
@@ -37,6 +39,8 @@ __all__ = [
     "StrategyReplicationObserver",
     "GRUEnsembleObserver",
     "GRUObserver",
+    "FEATURE_GROUP_COLUMNS",
+    "FeatureGroup",
     "PublicFeatures",
     "TaskCEpisode",
     "TrivialReferenceObserver",

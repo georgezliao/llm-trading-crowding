@@ -102,6 +102,29 @@ def test_aggregate_flow_drives_impact_and_includes_background_flow() -> None:
     assert result.fill_prices[0] == pytest.approx(config["simulation"]["initial_price"])
 
 
+def test_impact_off_returns_equal_exogenous_returns() -> None:
+    exogenous_returns = [0.01, -0.02, 0.005]
+    result = simulate_market(
+        _config(3, cost_rate=0.0, impact=0.0),
+        [FixedOrderAgent([20.0, -40.0, 10.0])],
+        _path(exogenous_returns, background_flow=30.0),
+    )
+
+    np.testing.assert_array_equal(result.returns, exogenous_returns)
+
+
+def test_risk_off_produces_no_forced_orders() -> None:
+    config = _config(2, cost_rate=0.0)
+    config["agents"]["risk"]["enabled"] = False
+    config["agents"]["risk"]["max_leverage"] = 1.0e-6
+    agent = FixedOrderAgent([1.0, -2.0], initial_position=10.0)
+
+    result = simulate_market(config, [agent], _path([0.0, 0.0]))
+
+    np.testing.assert_array_equal(result.orders[:, 0], [1.0, -2.0])
+    assert not np.any(result.forced)
+
+
 def test_exogenous_path_length_must_match_configuration() -> None:
     config = deepcopy(_config(2, cost_rate=0.0))
     with pytest.raises(ValueError, match="path length"):

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Collection, Literal, Mapping, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,6 +12,19 @@ from herdlab.inference.observer_data import PublicRecordSource, load_public_reco
 
 
 FloatArray = NDArray[np.float64]
+FeatureGroup: TypeAlias = Literal[
+    "order_flow", "volatility", "liquidity", "volume"
+]
+FEATURE_GROUP_COLUMNS: Mapping[FeatureGroup, tuple[str, ...]] = {
+    "order_flow": ("imbalance_to_liquidity",),
+    "volatility": ("realized_volatility",),
+    "liquidity": (
+        "log_liquidity",
+        "liquidity_change",
+        "volume_to_liquidity",
+    ),
+    "volume": ("log1p_volume",),
+}
 
 
 @dataclass(frozen=True)
@@ -34,14 +47,20 @@ class PublicFeatures:
 
 
 def build_public_features(
-    source: PublicRecordSource, *, return_lookback: int = 10
+    source: PublicRecordSource,
+    *,
+    return_lookback: int = 10,
+    exclude_groups: Collection[FeatureGroup | str] = (),
 ) -> PublicFeatures:
     """Build public-only Task C features without looking beyond each row.
 
     The features are lagged returns (including the current observed return),
     current realized volatility, log volume, observable signed imbalance
     scaled by liquidity, log liquidity, the current liquidity change, and
-    volume scaled by liquidity.  No private record type is accepted here.
+    volume scaled by liquidity.  ``exclude_groups`` removes complete named
+    public-feature groups for observer ablations.  Return lags do not belong
+    to an ablatable group and are therefore always retained.  No private
+    record type is accepted here.
     """
 
     if isinstance(return_lookback, bool) or not isinstance(
@@ -51,6 +70,7 @@ def build_public_features(
     lookback = int(return_lookback)
     if lookback <= 0:
         raise ValueError("return_lookback must be positive")
+    excluded = _validate_excluded_groups(exclude_groups)
 
     public = load_public_record(source)
     returns = np.asarray(public.returns, dtype=np.float64)
@@ -85,7 +105,31 @@ def build_public_features(
         "liquidity_change",
         "volume_to_liquidity",
     )
-    return PublicFeatures(values=np.column_stack((lagged, current)), names=names)
+    values = np.column_stack((lagged, current))
+    excluded_columns = {
+        column
+        for group in excluded
+        for column in FEATURE_GROUP_COLUMNS[group]
+    }
+    retained = tuple(
+        index for index, name in enumerate(names) if name not in excluded_columns
+    )
+    return PublicFeatures(values=values[:, retained], names=tuple(names[index] for index in retained))
+
+
+def _validate_excluded_groups(
+    exclude_groups: Collection[FeatureGroup | str],
+) -> frozenset[FeatureGroup]:
+    if isinstance(exclude_groups, str) or not isinstance(exclude_groups, Collection):
+        raise TypeError("exclude_groups must be a collection of feature-group names")
+    unknown = set(exclude_groups).difference(FEATURE_GROUP_COLUMNS)
+    if unknown:
+        supported = ", ".join(FEATURE_GROUP_COLUMNS)
+        invalid = ", ".join(sorted(repr(group) for group in unknown))
+        raise ValueError(
+            f"unknown feature group(s): {invalid}; supported groups: {supported}"
+        )
+    return frozenset(exclude_groups)  # type: ignore[return-value]
 
 
 def build_strategy_replication_features(
@@ -205,6 +249,8 @@ extract_features = build_public_features
 
 
 __all__ = [
+    "FEATURE_GROUP_COLUMNS",
+    "FeatureGroup",
     "PublicFeatures",
     "build_public_features",
     "build_strategy_replication_features",

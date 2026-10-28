@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Sequence
+from typing import Collection, Sequence
 
 import numpy as np
 import torch
@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from torch import Tensor, nn
 
 from herdlab.inference.baselines import TaskCEpisode, split_episodes
-from herdlab.inference.features import build_public_features
+from herdlab.inference.features import FeatureGroup, build_public_features
 
 
 FloatArray = NDArray[np.float64]
@@ -57,6 +57,7 @@ class GRUObserver:
         min_delta: float = 1.0e-5,
         validation_fraction: float = 0.2,
         seed: int = 0,
+        exclude_feature_groups: Collection[FeatureGroup | str] = (),
     ) -> None:
         self.return_lookback = _positive_integer(return_lookback, "return_lookback")
         self.sequence_length = _positive_integer(sequence_length, "sequence_length")
@@ -76,6 +77,7 @@ class GRUObserver:
         self.seed = int(seed)
         if not 0 <= self.seed < 2**63:
             raise ValueError("seed must be in [0, 2**63)")
+        self.exclude_feature_groups = tuple(exclude_feature_groups)
 
         self._model: _CausalGRU | None = None
         self._feature_mean: FloatArray | None = None
@@ -98,9 +100,17 @@ class GRUObserver:
             test_fraction=self.validation_fraction,
             rng=np.random.default_rng(self.seed),
         )
-        training_arrays = [_public_episode_array(item, self.return_lookback) for item in training]
+        training_arrays = [
+            _public_episode_array(
+                item, self.return_lookback, self.exclude_feature_groups
+            )
+            for item in training
+        ]
         validation_arrays = [
-            _public_episode_array(item, self.return_lookback) for item in validation
+            _public_episode_array(
+                item, self.return_lookback, self.exclude_feature_groups
+            )
+            for item in validation
         ]
         if any(len(features) == 0 for features, _ in training_arrays + validation_arrays):
             raise ValueError("each episode must contain at least one labeled time step")
@@ -174,7 +184,9 @@ class GRUObserver:
         self._model.eval()
         with torch.no_grad():
             for episode in episodes:
-                features, _ = _public_episode_array(episode, self.return_lookback)
+                features, _ = _public_episode_array(
+                    episode, self.return_lookback, self.exclude_feature_groups
+                )
                 normalized = (features - self._feature_mean) / self._feature_scale
                 windows = torch.from_numpy(
                     _causal_windows(normalized, self.sequence_length)
@@ -224,6 +236,7 @@ class GRUEnsembleObserver:
         patience: int = 5,
         min_delta: float = 1.0e-5,
         validation_fraction: float = 0.2,
+        exclude_feature_groups: Collection[FeatureGroup | str] = (),
     ) -> None:
         if not seeds:
             raise ValueError("seeds must not be empty")
@@ -237,6 +250,7 @@ class GRUEnsembleObserver:
         self.patience = patience
         self.min_delta = min_delta
         self.validation_fraction = validation_fraction
+        self.exclude_feature_groups = tuple(exclude_feature_groups)
         self.observers_: tuple[GRUObserver, ...] = ()
 
     def fit(self, episodes: Sequence[TaskCEpisode]) -> GRUEnsembleObserver:
@@ -254,6 +268,7 @@ class GRUEnsembleObserver:
                 min_delta=self.min_delta,
                 validation_fraction=self.validation_fraction,
                 seed=seed,
+                exclude_feature_groups=self.exclude_feature_groups,
             ).fit(episodes)
             for seed in self.seeds
         )
@@ -284,12 +299,16 @@ class GRUEnsembleObserver:
 
 
 def _public_episode_array(
-    episode: TaskCEpisode, return_lookback: int
+    episode: TaskCEpisode,
+    return_lookback: int,
+    exclude_feature_groups: Collection[FeatureGroup | str] = (),
 ) -> tuple[FloatArray, NDArray[np.float32]]:
     """Extract only public features plus the separately supplied target."""
 
     features = build_public_features(
-        episode.public, return_lookback=return_lookback
+        episode.public,
+        return_lookback=return_lookback,
+        exclude_groups=exclude_feature_groups,
     ).values
     labels = np.asarray(episode.labels, dtype=np.float32)
     return np.asarray(features[: len(labels)], dtype=np.float64), labels

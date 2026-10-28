@@ -66,6 +66,21 @@ def test_logistic_and_lightgbm_return_one_probability_per_label() -> None:
         assert np.all((0.0 <= predictions[0]) & (predictions[0] <= 1.0))
 
 
+def test_lightgbm_observer_uses_feature_group_ablation() -> None:
+    episodes = tuple(_episode(index) for index in range(3))
+    observer = LightGBMObserver(
+        return_lookback=3,
+        exclude_feature_groups=("order_flow", "liquidity"),
+        rng=np.random.default_rng(9),
+        n_estimators=5,
+    )
+
+    predictions = observer.fit(episodes[:2]).predict_proba(episodes[2:])
+
+    assert observer._features(episodes[0]).shape[1] == 5
+    assert predictions[0].shape == np.asarray(episodes[2].labels).shape
+
+
 def test_strategy_replicator_uses_the_lightgbm_observer_settings() -> None:
     config = {
         "simulation": {"realized_vol_lookback": 3},

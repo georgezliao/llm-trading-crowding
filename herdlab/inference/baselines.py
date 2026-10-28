@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, Sequence, TypeVar
+from typing import Any, Collection, Mapping, Protocol, Sequence, TypeVar
 
 import numpy as np
 from lightgbm import LGBMClassifier
@@ -13,6 +13,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from herdlab.inference.features import (
+    FeatureGroup,
     build_public_features,
     build_strategy_replication_features,
 )
@@ -95,8 +96,14 @@ class _ProbabilityEstimator(Protocol):
 class _BaseObserver:
     """Shared public-feature handling for independently fitted baselines."""
 
-    def __init__(self, *, return_lookback: int = 10) -> None:
+    def __init__(
+        self,
+        *,
+        return_lookback: int = 10,
+        exclude_feature_groups: Collection[FeatureGroup | str] = (),
+    ) -> None:
         self.return_lookback = return_lookback
+        self.exclude_feature_groups = tuple(exclude_feature_groups)
         self._estimator: _ProbabilityEstimator | None = None
         self._constant_probability: float | None = None
 
@@ -106,7 +113,9 @@ class _BaseObserver:
     def _features(self, episode: TaskCEpisode) -> FloatArray:
         return np.asarray(
             build_public_features(
-                episode.public, return_lookback=self.return_lookback
+                episode.public,
+                return_lookback=self.return_lookback,
+                exclude_groups=self.exclude_feature_groups,
             ).values[: len(episode.labels)],
             dtype=np.float64,
         )
@@ -198,8 +207,12 @@ class LightGBMObserver(_BaseObserver):
         n_estimators: int = 100,
         learning_rate: float = 0.05,
         num_leaves: int = 15,
+        exclude_feature_groups: Collection[FeatureGroup | str] = (),
     ) -> None:
-        super().__init__(return_lookback=return_lookback)
+        super().__init__(
+            return_lookback=return_lookback,
+            exclude_feature_groups=exclude_feature_groups,
+        )
         if not isinstance(rng, np.random.Generator):
             raise TypeError("rng must be a numpy.random.Generator")
         self.random_seed = int(rng.integers(0, np.iinfo(np.int32).max))

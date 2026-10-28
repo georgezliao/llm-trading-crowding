@@ -10,6 +10,7 @@ import pytest
 from herdlab.agents.base import PublicObservation
 from herdlab.agents.factor import MeanReversionAgent, MomentumAgent
 from herdlab.inference.features import (
+    FEATURE_GROUP_COLUMNS,
     build_public_features,
     build_strategy_replication_features,
 )
@@ -71,6 +72,63 @@ def test_public_features_use_only_observations_at_or_before_t() -> None:
         original_features.values[cutoff + 1 :],
         changed_features.values[cutoff + 1 :],
     )
+
+
+@pytest.mark.parametrize("excluded_group", FEATURE_GROUP_COLUMNS)
+def test_feature_group_ablation_removes_only_the_group_columns(
+    excluded_group: str,
+) -> None:
+    public = _public_record()
+    full = build_public_features(public, return_lookback=3)
+    ablated = build_public_features(
+        public,
+        return_lookback=3,
+        exclude_groups=(excluded_group,),
+    )
+    removed = set(FEATURE_GROUP_COLUMNS[excluded_group])  # type: ignore[index]
+    retained_indices = [
+        index for index, name in enumerate(full.names) if name not in removed
+    ]
+
+    assert all(name.startswith("return_lag_") for name in ablated.names[:3])
+    assert ablated.names == tuple(full.names[index] for index in retained_indices)
+    np.testing.assert_array_equal(ablated.values, full.values[:, retained_indices])
+
+
+def test_ablated_public_features_remain_causal() -> None:
+    public = _public_record()
+    cutoff = 3
+    changed = replace(
+        public,
+        returns=np.r_[public.returns[: cutoff + 1], np.full(4, 99.0)],
+        volume=np.r_[public.volume[: cutoff + 1], np.full(4, 999.0)],
+        executed_imbalance=np.r_[
+            public.executed_imbalance[: cutoff + 1], np.full(4, -999.0)
+        ],
+        realized_volatility=np.r_[
+            public.realized_volatility[: cutoff + 1], np.full(4, 88.0)
+        ],
+        liquidity_proxy=np.r_[
+            public.liquidity_proxy[: cutoff + 1], np.full(4, 777.0)
+        ],
+    )
+
+    original = build_public_features(
+        public, return_lookback=3, exclude_groups=("liquidity",)
+    )
+    perturbed = build_public_features(
+        changed, return_lookback=3, exclude_groups=("liquidity",)
+    )
+
+    assert original.names == perturbed.names
+    np.testing.assert_array_equal(
+        original.values[: cutoff + 1], perturbed.values[: cutoff + 1]
+    )
+
+
+def test_feature_group_ablation_rejects_unknown_groups_and_returns() -> None:
+    with pytest.raises(ValueError, match="unknown feature group"):
+        build_public_features(_public_record(), exclude_groups=("returns",))
 
 
 def test_feature_builder_rejects_private_records() -> None:

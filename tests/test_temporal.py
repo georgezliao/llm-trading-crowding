@@ -98,6 +98,28 @@ def test_gru_predictions_are_causal() -> None:
     )
 
 
+def test_gru_observer_uses_feature_group_ablation() -> None:
+    training = tuple(_episode(index) for index in range(4))
+    observer = GRUObserver(
+        return_lookback=3,
+        sequence_length=4,
+        hidden_size=5,
+        learning_rate=0.01,
+        batch_size=16,
+        max_epochs=4,
+        patience=2,
+        validation_fraction=0.25,
+        seed=13,
+        exclude_feature_groups=("volatility", "volume"),
+    ).fit(training)
+
+    predictions = observer.predict_proba((_episode(25),))
+
+    assert observer._model is not None
+    assert observer._model.gru.input_size == 7
+    assert predictions[0].shape == np.asarray(_episode(25).labels).shape
+
+
 def test_gru_fit_is_deterministic_for_a_fixed_seed() -> None:
     training = tuple(_episode(index) for index in range(4))
     evaluation = (_episode(30), _episode(31))

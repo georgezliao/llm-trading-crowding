@@ -75,6 +75,7 @@ agents:
   initial_cash: 10000.0
   transaction_cost_rate: 0.0001
   risk:
+    enabled: true
     max_drawdown: 0.20
     max_leverage: 2.0
     liquidation_steps: 5

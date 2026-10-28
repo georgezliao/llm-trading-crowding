@@ -84,8 +84,14 @@ class MarketSimulator:
         self.impact_function = impact_function or _impact_from_config(market)
         self.private_signal = private_signal_config(config)
         self._private_signals = private_signals
-        limits = RiskLimits.from_config(config)
-        self.risk_managers = [RiskManager(limits) for _ in self.agents]
+        self.risk_enabled = _risk_enabled(config)
+        if self.risk_enabled:
+            limits = RiskLimits.from_config(config)
+            self.risk_managers: list[RiskManager | None] = [
+                RiskManager(limits) for _ in self.agents
+            ]
+        else:
+            self.risk_managers = [None for _ in self.agents]
         self.volatility_lookback = int(config["simulation"]["realized_vol_lookback"])
         if self.volatility_lookback <= 0:
             raise ValueError("simulation.realized_vol_lookback must be positive")
@@ -158,14 +164,18 @@ class MarketSimulator:
                     strategy_order = agent.decide(
                         observation, forecast_adjustment=float(adjustment)
                     )
-                decision = risk_manager.apply(
-                    strategy_order,
-                    position=float(positions[step, index]),
-                    price=float(prices[step]),
-                    equity=float(equity[step, index]),
-                )
-                orders[step, index] = decision.quantity
-                forced[step, index] = decision.forced
+                if risk_manager is None:
+                    orders[step, index] = strategy_order
+                    forced[step, index] = False
+                else:
+                    decision = risk_manager.apply(
+                        strategy_order,
+                        position=float(positions[step, index]),
+                        price=float(prices[step]),
+                        equity=float(equity[step, index]),
+                    )
+                    orders[step, index] = decision.quantity
+                    forced[step, index] = decision.forced
 
             fill_prices[step] = prices[step]
             costs[step] = self.cost_rate * np.abs(orders[step]) * fill_prices[step]
@@ -273,6 +283,14 @@ def _accounting_config(config: Mapping[str, Any]) -> tuple[float, float, float]:
     if not np.isfinite(cost_rate) or cost_rate < 0.0:
         raise ValueError("agents.transaction_cost_rate must be finite and nonnegative")
     return initial_price, initial_cash, cost_rate
+
+
+def _risk_enabled(config: Mapping[str, Any]) -> bool:
+    risk = config["agents"]["risk"]
+    enabled = risk.get("enabled", True)
+    if not isinstance(enabled, (bool, np.bool_)):
+        raise TypeError("agents.risk.enabled must be a boolean")
+    return bool(enabled)
 
 
 def _impact_from_config(config: Mapping[str, Any]) -> ImpactFunction:
