@@ -170,3 +170,25 @@ Fixed setting: `configs/experiment_zero.yaml` (impact 0.03, leverage ×20, drawd
 - Maximum price drawdown also rose from 0.10941507 to 0.21288511 across the overlap endpoints, but forced-order fractions were zero except 0.00001111 at ω = 0.
 - These runs show that added private information weakens the public observer under the fixed degradation comparison, and that mechanically increased learned-agent overlap raises alignment and the broad agent-selling event rate in this simulator.
 - They do not show that overlap produced forced-liquidation cascades, identify causal mechanisms behind the observer scores, establish transfer beyond this simulator, or provide evidence about real-market crowding.
+
+### Pre-registration, round 5 (written 2026-11-05, before running)
+
+Motivation, from the review of round 4. GRU PR-AUC fell from 0.96 at ρ = 0 to about 0.21 at ρ = 0.1, then rose to 0.32 at ρ = 0.5. Because ρ = 0 switches the signal term off entirely, the round-4 degradation contrast mixes "noise added to forecasts" with "information added to forecasts". Forced flow also almost vanished at ρ > 0. Separately, the ρ = 0 score (0.96) is well above round 3's in-distribution 0.80. Round 3's v2 cohort used the population in `configs/heldout_families.yaml` and `configs/heldout_impact.yaml` with seeds 1000–2049, while round 4 used `configs/experiment_zero.yaml` with seeds 8000–8549, so population and seeds were both changed.
+
+The noise explanation was formed after seeing round-4 results, so this round is a test of a post-hoc hypothesis. Written prediction: at fixed β, a larger ρ gives agents more common information, so crowding should become easier to see, not harder. This is the opposite of the round-4 rule's reading.
+
+Fixed setting unless stated: `configs/experiment_zero.yaml`, horizon 10, training-only 0.95 score quantile within every condition, train seeds 8000–8199, test seeds 8500–8549, GRU ensemble over seeds 6000–6002.
+
+1. **Reconciliation.** A 2×2 design crosses population (round-3 v2 in-distribution cohort, `experiment_zero.yaml`) with seed set (round-3 v2 train and in-distribution seeds, round-4 seeds), with no signal. Observers: LightGBM and GRU seed 6000, default label. Each cell where both population and seeds match an earlier run must reproduce that run's LightGBM PR-AUC to 4 decimal places; a mismatch is reported as a reproducibility failure, not explained away.
+2. **Noise-only control.** A new mode `agents.private_signal.mode` takes `off`, `signal` or `noise_only`. `noise_only` adds β·σ̂_t·ε_{i,t} with ε_{i,t} ~ N(0,1), which is the ρ = 0 limit of the signal term with unit variance and no information. Existing configs keep their behavior: `strength: 0` still means off unless `mode: noise_only` is set explicitly.
+3. **Grid.** β ∈ {0.1, 0.25, 0.5, 1.0} × {noise-only, ρ = 0.25, ρ = 0.5}, plus the off baseline: 13 conditions. Observers: trivial, logistic, LightGBM, replicator, GRU ensemble. Labels: default (primary) and forced-flow (secondary). Report at each β the ratio of the standard deviation of the signal term to that of the agent's base forecast, pooled by agent family.
+4. **Forced-flow stress conditions.** β = 0.25 × ρ ∈ {0.25, 0.5} × `risk.max_drawdown` ∈ {0.05, 0.10}: 4 more conditions with the same observers and labels. These values are fixed now and are not selected from results.
+5. **Overlap under stress.** The round-4 ω sweep (ω ∈ {0, 0.25, 0.5, 0.75, 1.0}, `learned_overlap_mode: lag_weights`, seeds 7000–7029) rerun at ρ = 0.25, β = 0.25, `max_drawdown` 0.05, with the same outcomes plus forced-flow event count per level.
+6. **Decision rules, fixed now.** GRU gain means GRU ensemble PR-AUC minus trivial PR-AUC. All cross-condition contrasts resample test episodes jointly, since seeds are shared.
+   - *Noise effect at β:* (gain off) − (gain noise-only). Noise degrades inference at β if the CI lies above 0.
+   - *Information effect at β and ρ:* (gain at ρ) − (gain noise-only). Private information makes inference harder at that cell only if the CI lies below 0, and easier only if it lies above 0.
+   - The round-4 "private information degrades inference" reading is reported as *not supported* if, at β = 1, the noise effect CI lies above 0 and the information effect CI at ρ = 0.5 does not lie below 0.
+   - *Swamping:* the report states the smallest β whose noise effect CI includes 0, or says none.
+   - The replication rule applies at every condition. Conditions with a test base rate below 1% are uninformative. Forced-flow results with fewer than 30 test events are underpowered.
+   - *H1 for forced selling* is supported only if the bootstrap CI of the slope of episode forced-order fraction on ω lies above 0 and at least three ω levels have 30 or more forced-flow events in total across their episodes. Otherwise the report says forced selling was not tested adequately.
+7. No β, ρ, ω, drawdown limit, seed range, threshold rule or observer hyperparameter is changed after viewing round-5 metrics. If total runtime would exceed about 75 minutes, the run stops and reports instead of cutting episodes.
