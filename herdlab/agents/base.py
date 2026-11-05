@@ -59,6 +59,7 @@ class Agent(ABC):
         self.u_max = float(u_max)
         self.epsilon = float(epsilon)
         self.position = float(initial_position)
+        self.last_base_forecast: float | None = None
 
     @abstractmethod
     def forecast(self, observation: PublicObservation) -> float:
@@ -91,8 +92,9 @@ class Agent(ABC):
 
         if not np.isfinite(forecast_adjustment):
             raise ValueError("forecast_adjustment must be finite")
+        self.last_base_forecast = self.forecast(observation)
         target = self.target_position(
-            self.forecast(observation) + forecast_adjustment,
+            self.last_base_forecast + forecast_adjustment,
             observation.realized_volatility,
         )
         return float(np.clip(target - self.position, -self.u_max, self.u_max))

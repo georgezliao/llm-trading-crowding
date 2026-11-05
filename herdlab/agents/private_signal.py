@@ -24,6 +24,13 @@ class PrivateSignalConfig:
     strength: float
     beta: float
     rng_stream: int
+    mode: str = "signal"
+
+    @property
+    def enabled(self) -> bool:
+        return self.mode == "noise_only" or (
+            self.mode == "signal" and self.strength > 0.0
+        )
 
 
 def private_signal_config(config: Mapping[str, Any]) -> PrivateSignalConfig:
@@ -35,6 +42,9 @@ def private_signal_config(config: Mapping[str, Any]) -> PrivateSignalConfig:
         raise TypeError("agents.private_signal must be a mapping")
 
     strength = float(raw.get("strength", 0.0))
+    mode = raw.get("mode", "signal")
+    if mode not in ("off", "signal", "noise_only"):
+        raise ValueError("agents.private_signal.mode must be off, signal, or noise_only")
     beta = float(raw.get("beta", 1.0))
     stream_value = raw.get("rng_stream", 2)
     if isinstance(stream_value, bool) or not isinstance(
@@ -52,7 +62,7 @@ def private_signal_config(config: Mapping[str, Any]) -> PrivateSignalConfig:
             "agents.private_signal.rng_stream must be at least 2 to remain "
             "separate from exogenous and population streams"
         )
-    return PrivateSignalConfig(strength=strength, beta=beta, rng_stream=rng_stream)
+    return PrivateSignalConfig(strength=strength, beta=beta, rng_stream=rng_stream, mode=mode)
 
 
 def generate_private_signals(
@@ -64,8 +74,8 @@ def generate_private_signals(
     """Generate ``s[i,t]`` from the next exogenous return and private noise.
 
     Array row ``t`` is available only to agents deciding at step ``t``.  When
-    strength is zero the feature is switched off: this function returns exact
-    zeros without drawing from ``rng``.
+    disabled, this returns exact zeros without drawing from ``rng``.
+    Explicit noise_only mode ignores strength and returns unit-variance noise.
     """
 
     if isinstance(n_agents, bool) or not isinstance(n_agents, (int, np.integer)):
@@ -82,8 +92,26 @@ def generate_private_signals(
     if exogenous_returns.ndim != 1 or regimes.shape != exogenous_returns.shape:
         raise ValueError("exogenous returns and regimes must be equal-length vectors")
     n_steps = exogenous_returns.size
-    if settings.strength == 0.0:
+    if not settings.enabled:
         return np.zeros((n_steps, agent_count), dtype=np.float64)
+
+    mode = learned_overlap_mode(config)
+    if mode == "none":
+        # Preserve the round-3/R4-1 signal draw exactly in the default mode.
+        noise = rng.normal(0.0, 1.0, size=(n_steps, agent_count))
+    else:
+        agents = config["agents"] if "agents" in config else config
+        overlap = float(agents["feature_overlap"])
+        if not np.isfinite(overlap) or not 0.0 <= overlap <= 1.0:
+            raise ValueError("agents.feature_overlap must be finite and in [0, 1]")
+        common = rng.normal(0.0, 1.0, size=n_steps)
+        idiosyncratic = rng.normal(0.0, 1.0, size=(n_steps, agent_count))
+        noise = (
+            np.sqrt(overlap) * common[:, None]
+            + np.sqrt(1.0 - overlap) * idiosyncratic
+        )
+    if settings.mode == "noise_only":
+        return noise
 
     configured_volatility = np.asarray(
         config["exogenous"]["regime_volatility"], dtype=np.float64
@@ -102,21 +130,6 @@ def generate_private_signals(
     standardized_return = exogenous_returns / step_volatility
     if not np.all(np.isfinite(standardized_return)):
         raise ValueError("standardized exogenous returns must be finite")
-    mode = learned_overlap_mode(config)
-    if mode == "none":
-        # Preserve the round-3/R4-1 signal draw exactly in the default mode.
-        noise = rng.normal(0.0, 1.0, size=(n_steps, agent_count))
-    else:
-        agents = config["agents"] if "agents" in config else config
-        overlap = float(agents["feature_overlap"])
-        if not np.isfinite(overlap) or not 0.0 <= overlap <= 1.0:
-            raise ValueError("agents.feature_overlap must be finite and in [0, 1]")
-        common = rng.normal(0.0, 1.0, size=n_steps)
-        idiosyncratic = rng.normal(0.0, 1.0, size=(n_steps, agent_count))
-        noise = (
-            np.sqrt(overlap) * common[:, None]
-            + np.sqrt(1.0 - overlap) * idiosyncratic
-        )
     residual_scale = np.sqrt(1.0 - settings.strength**2)
     return (
         settings.strength * standardized_return[:, None]

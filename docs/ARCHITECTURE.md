@@ -46,9 +46,38 @@ Decision model for agent i at time t:
 
 Optional constraints: position limits, execution costs, delay, max participation in volume.
 
-`agents.private_signal` configures `strength` (ρ), `beta`, and a `rng_stream` index. Episode seed streams 0 and 1 remain the exogenous-path and population-construction streams; the private signal uses its configured independent stream (2 by default). At ρ = 0 signal generation is bypassed, exact zeros are recorded, and the round-3 decision path is retained bit-for-bit. Signal row t is aligned with the decision at t and uses the exogenous innovation entering r_{t+1}, making this deliberately private predictive information rather than a public causal feature.
+`agents.private_signal` configures `mode`, `strength` (ρ), `beta`, and a
+`rng_stream` index. Round 5 adds these modes:
 
-Signals are serialized only in `PrivateRecord`, alongside per-agent positions, orders, risk state, and labels. `PublicRecord`, `PublicObservation`, the strict observer loader, and observer feature builders have no signal field.
+- `off`: exact zero signals and adjustments, regardless of strength; no signal RNG draws.
+- `signal` (default when omitted): the predictive equation above for ρ > 0.
+  At ρ = 0 it remains completely off, preserving existing configurations.
+- `noise_only`: s_{i,t} = ε_{i,t} and the adjustment is β σ̂_t ε_{i,t},
+  regardless of strength. Noise has unit marginal variance and is independent
+  of the next exogenous return. It uses the same independent or overlap-split
+  noise construction below, without the predictive term or sqrt(1−ρ²) scaling.
+
+Episode seed streams 0 and 1 remain the exogenous-path and population-construction
+streams; the private signal uses its configured independent stream (2 by default).
+Changing mode leaves the exogenous path unchanged. Existing configurations retain
+round-4 episode values bit-for-bit. Signal row t is aligned with the decision at t
+and, in predictive mode only, uses the exogenous innovation entering r_{t+1},
+making this deliberately private predictive information rather than a public
+causal feature.
+
+Signals are serialized only in `PrivateRecord`, alongside per-agent positions,
+orders, risk state, and labels. Round 5 also records `base_forecasts` (r̂) and
+`signal_terms` (β σ̂ s), each shaped (steps, agents), at decision time before
+risk overrides, including forced/cooldown steps. The base forecast is captured
+from the single existing forecast call, with no additional training or prediction.
+Columns follow population order (momentum, reversion, linear, GBDT, MLP), so the
+round-5 runner can pool rows and family columns to compute std(signal_terms) /
+std(base_forecasts). These diagnostics do not change any equation or label.
+For legacy manually constructed private records they may be absent (`None`);
+base forecasts are also unavailable if a custom agent bypasses the common
+forecast-based decision method. All configured agent families supply both arrays.
+`PublicRecord`, `PublicObservation`, the strict observer loader, and observer
+feature builders have none of these private fields.
 
 `agents.learned_overlap_mode` is `none` by default. In that mode the linear,
 GBDT and MLP input paths and the private-signal RNG draw order are unchanged

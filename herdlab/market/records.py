@@ -60,7 +60,11 @@ class PublicRecord:
 
 @dataclass(frozen=True)
 class PrivateRecord:
-    """Per-agent ground truth that must never enter the observer data path."""
+    """Per-agent ground truth that must never enter the observer data path.
+
+    Optional forecast diagnostics have shape (steps, agents), before risk
+    overrides. None denotes unavailable diagnostics in legacy/custom records.
+    """
 
     positions: FloatArray
     orders: FloatArray
@@ -73,6 +77,8 @@ class PrivateRecord:
     position_crowding: FloatArray
     flow_crowding: FloatArray
     signals: FloatArray | None = None
+    base_forecasts: FloatArray | None = None
+    signal_terms: FloatArray | None = None
 
     def __post_init__(self) -> None:
         state_arrays = (self.positions, self.cash, self.equity)
@@ -120,6 +126,12 @@ class PrivateRecord:
                 raise ValueError(f"{name} must be finite and in [0, 1]")
         if np.any(self.transaction_costs < 0.0):
             raise ValueError("transaction_costs must be nonnegative")
+        for name in ("base_forecasts", "signal_terms"):
+            values = getattr(self, name)
+            if values is not None:
+                _validate_float_arrays((values,), ndim=2, label=name)
+                if values.shape != (n_steps, n_agents):
+                    raise ValueError(f"{name} must have shape (steps, agents)")
         if self.signals is None:
             object.__setattr__(
                 self, "signals", np.zeros((n_steps, n_agents), dtype=np.float64)
@@ -191,6 +203,10 @@ def split_simulation_records(
         position_crowding=position_crowding(result.positions),
         flow_crowding=flow_crowding(result.orders),
         signals=np.asarray(result.signals, dtype=np.float64).copy(),
+        base_forecasts=(
+            None if result.base_forecasts is None else result.base_forecasts.copy()
+        ),
+        signal_terms=result.signal_terms.copy(),
     )
     return public, private
 

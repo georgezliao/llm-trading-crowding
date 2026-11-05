@@ -57,6 +57,8 @@ class SimulationResult:
     equity: FloatArray
     leverage: FloatArray
     signals: FloatArray
+    base_forecasts: FloatArray | None
+    signal_terms: FloatArray
 
 
 class MarketSimulator:
@@ -107,10 +109,12 @@ class MarketSimulator:
         n_agents = len(self.agents)
         signals = _validated_private_signals(
             self._private_signals,
-            strength=self.private_signal.strength,
+            enabled=self.private_signal.enabled,
             n_steps=n_steps,
             n_agents=n_agents,
         )
+        base_forecasts = np.full((n_steps, n_agents), np.nan)
+        signal_terms = np.zeros((n_steps, n_agents), dtype=np.float64)
         prices = np.empty(n_steps + 1, dtype=np.float64)
         returns = np.empty(n_steps, dtype=np.float64)
         fill_prices = np.empty(n_steps, dtype=np.float64)
@@ -151,7 +155,9 @@ class MarketSimulator:
             for index, (agent, risk_manager) in enumerate(
                 zip(self.agents, self.risk_managers, strict=True)
             ):
-                if self.private_signal.strength == 0.0:
+                # A custom decision override may not produce a base forecast.
+                agent.last_base_forecast = None
+                if not self.private_signal.enabled:
                     # Preserve the round-3 decision call exactly when private
                     # information is switched off.
                     strategy_order = agent.decide(observation)
@@ -161,9 +167,12 @@ class MarketSimulator:
                         * realized_volatility
                         * signals[step, index]
                     )
+                    signal_terms[step, index] = adjustment
                     strategy_order = agent.decide(
                         observation, forecast_adjustment=float(adjustment)
                     )
+                if agent.last_base_forecast is not None:
+                    base_forecasts[step, index] = agent.last_base_forecast
                 if risk_manager is None:
                     orders[step, index] = strategy_order
                     forced[step, index] = False
@@ -221,6 +230,10 @@ class MarketSimulator:
             equity=equity,
             leverage=leverage,
             signals=signals,
+            base_forecasts=(
+                base_forecasts if np.all(np.isfinite(base_forecasts)) else None
+            ),
+            signal_terms=signal_terms,
         )
 
     def run_records(
@@ -325,16 +338,15 @@ def _validate_exogenous(exogenous: ExogenousPath) -> int:
 def _validated_private_signals(
     signals: FloatArray | None,
     *,
-    strength: float,
+    enabled: bool,
     n_steps: int,
     n_agents: int,
 ) -> FloatArray:
     expected_shape = (n_steps, n_agents)
     if signals is None:
-        if strength > 0.0:
+        if enabled:
             raise ValueError(
-                "private_signals are required when agents.private_signal.strength "
-                "is positive"
+                "private_signals are required when private signals are enabled"
             )
         return np.zeros(expected_shape, dtype=np.float64)
 
@@ -343,8 +355,8 @@ def _validated_private_signals(
         raise ValueError(f"private_signals must have shape {expected_shape}")
     if not np.all(np.isfinite(values)):
         raise ValueError("private_signals must be finite")
-    if strength == 0.0 and np.any(values != 0.0):
-        raise ValueError("private_signals must be zero when signal strength is zero")
+    if not enabled and np.any(values != 0.0):
+        raise ValueError("private_signals must be zero when private signals are disabled")
     return values.copy()
 
 
