@@ -79,6 +79,15 @@ forecast-based decision method. All configured agent families supply both arrays
 `PublicRecord`, `PublicObservation`, the strict observer loader, and observer
 feature builders have none of these private fields.
 
+The round-5 grid runner reduces these diagnostics to per-episode, per-family
+counts, sums, and squared sums inside simulation workers. Its scale ratio pools
+all decision rows and family columns across the 200 training and 50 test episodes,
+including warm-up and risk-overridden decisions. Whole-episode resampling of
+these moments supplies diagnostic 95% CIs; the moments never enter observer
+fitting. Condition caches retain evaluation results, test labels/predictions for
+joint-seed contrasts, diagnostic intervals, and measured compute times. No
+simulator equation, target definition, or threshold rule changes in R5-3.
+
 `agents.learned_overlap_mode` is `none` by default. In that mode the linear,
 GBDT and MLP input paths and the private-signal RNG draw order are unchanged
 from round 3. The optional `lag_weights` mode extends the factor-agent overlap

@@ -417,9 +417,13 @@ def _run_condition(
     lightgbm_seed: int,
     gru_seeds: Sequence[int],
     gru_kwargs: Mapping[str, Any] | None,
+    samples: tuple[Sequence[EpisodeSample], Sequence[EpisodeSample]] | None = None,
 ) -> tuple[ConditionResult, _ConditionBundle]:
-    training = _simulate(config, TRAINING_SEEDS, workers=workers)
-    test = _simulate(config, TEST_SEEDS, workers=workers)
+    if samples is None:
+        training = _simulate(config, TRAINING_SEEDS, workers=workers)
+        test = _simulate(config, TEST_SEEDS, workers=workers)
+    else:
+        training, test = samples
     labels: dict[str, LabelResult] = {}
     bundles: dict[str, _LabelBundle] = {}
     for label_index, label_name in enumerate(LABEL_NAMES):
