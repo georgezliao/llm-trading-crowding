@@ -21,3 +21,4 @@ docs/reports/*
 !docs/reports/round5_reconcile.md
 
 !docs/reports/experiment_zero_round5.md
+!docs/reports/overlap_sweep_stress.md

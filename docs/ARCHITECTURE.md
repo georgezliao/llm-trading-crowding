@@ -191,3 +191,23 @@ tests/
 Python + NumPy/Polars (simulator deterministic given a seed), PyTorch, LightGBM, DuckDB + Parquet, Hydra or YAML configs, pytest, Streamlit/Plotly once experiments work. Single language; move the event loop to C++/Rust only if profiling justifies it.
 
 Tests must cover position accounting, cash conservation under execution, timestamps, risk rules, and public/private data separation.
+
+## Round-5 overlap stress diagnostic
+
+`experiments/overlap_sweep_stress.py` wraps the round-4 overlap analysis without
+changing its runner or report. It uses the registered rho=0.25, beta=0.25,
+max_drawdown=0.05, lag_weights mode, five omega levels, and seeds 7000–7029.
+The five original episode outcomes and matched-seed slope bootstrap are reused.
+Forced-flow counts use the existing gross forced-selling target and a separate
+0.95 quantile fitted on omega=0.5 calibration episodes, held fixed across levels.
+This extends the round-4 own-episode calibration convention to the added label;
+item 5 does not explicitly name its calibration source, so the report flags
+this interpretation for research-lead review. The calibration level's rates
+are in-sample diagnostics, not held-out prediction results. Counts include
+overlapping positive future windows; bootstrap units remain whole episodes.
+The forced-selling H1 rule requires a strictly positive lower CI bound for the
+forced-order-fraction slope and at least three levels with >=30 forced-flow
+positives. Otherwise it returns “forced selling was not tested adequately.”
+Forced-order fraction includes forced buys and sells; event counts include only
+forced selling. No simulator equation or existing target definition changes,
+and none of these private diagnostics enter observer inputs.
