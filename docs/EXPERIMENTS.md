@@ -192,3 +192,7 @@ Fixed setting unless stated: `configs/experiment_zero.yaml`, horizon 10, trainin
    - The replication rule applies at every condition. Conditions with a test base rate below 1% are uninformative. Forced-flow results with fewer than 30 test events are underpowered.
    - *H1 for forced selling* is supported only if the bootstrap CI of the slope of episode forced-order fraction on ω lies above 0 and at least three ω levels have 30 or more forced-flow events in total across their episodes. Otherwise the report says forced selling was not tested adequately.
 7. No β, ρ, ω, drawdown limit, seed range, threshold rule or observer hyperparameter is changed after viewing round-5 metrics. If total runtime would exceed about 75 minutes, the run stops and reports instead of cutting episodes.
+
+### Amendment 2 (written 2026-11-05, after the R5-3 runtime stop, before any grid metric existed)
+
+The R5-3 step stopped before running because a conservative estimate of 81 minutes exceeded the roughly 75-minute limit in item 7. The limit was a guard against unplanned compute, not a scientific parameter, so it is raised to about 120 minutes for R5-3 and R5-4 combined. No condition, seed, episode count, threshold rule, observer or decision rule changes. The reconciliation results from R5-2 were available when this was written, but they do not bear on the runtime limit.
