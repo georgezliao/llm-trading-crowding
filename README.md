@@ -18,14 +18,18 @@ python -m venv .venv
 .venv/bin/pytest -q
 ```
 
-Run the latest experiments. Each writes its report to `docs/reports/`, and the first takes about 30 minutes on 10 CPU cores:
+Run the latest experiments. Each writes its report to `docs/reports/`. The grid took about 100 minutes of compute on 10 CPU cores, and finished conditions are cached under `runs/round5_cache/`:
 
 ```bash
-.venv/bin/python -m herdlab.experiments.experiment_zero_round4
+.venv/bin/python -m herdlab.experiments.round5_reconcile
 ```
 
 ```bash
-.venv/bin/python -m herdlab.experiments.overlap_sweep
+.venv/bin/python -m herdlab.experiments.experiment_zero_round5
+```
+
+```bash
+.venv/bin/python -m herdlab.experiments.overlap_sweep_stress
 ```
 
 ## How it works
@@ -41,18 +45,22 @@ Equations and design choices are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 | Question | Result | Main caveat |
 |---|---|---|
 | Does the GRU generalize to an agent architecture it never trained on? (round 3) | PR-AUC 0.66 [0.41, 0.79] against 0.04 for the trivial reference, at a 1.5% base rate | LightGBM reaches 0.60, and agents saw only public prices |
-| Does private information make inference harder? (round 4) | The pre-registered rule says yes: PR-AUC falls from 0.96 at ρ = 0 to 0.32 at ρ = 0.5 | Probably confounded. PR-AUC drops to about 0.21 at ρ = 0.1, then recovers as ρ grows, which suggests the added noise matters more than the information |
-| Does shared agent input raise crowding? (H1, round 4) | Yes: mean position alignment rises from 0.25 to 0.83 and the event rate from 0.03% to 14% as overlap goes from 0 to 1 | Almost no forced orders occurred, so this is synchronized selling, not a liquidation cascade |
+| Does private information make inference harder? (rounds 4 and 5) | Often, once noise is controlled for. At β = 0.25, GRU PR-AUC is 0.68 with noise only and 0.30 at ρ = 0.5, a gain change of −0.38 [−0.49, −0.22] | At β = 1 the direction flips and information makes inference easier. Noise alone also degrades inference at every tested β, so the round-4 result mixed the two effects |
+| Does shared agent input raise crowding? (H1, rounds 4 and 5) | Yes: mean position alignment rises from 0.25 to 0.83 and the event rate from 0.03% to 14% as overlap goes from 0 to 1 | Forced selling doesn't follow. Under a 5% drawdown limit, forced-flow windows fall from 2,841 to 14 as overlap rises |
+| Can the observer predict forced selling? (round 5) | Weakly: GRU PR-AUC is 0.09–0.18 at base rates of 1.6–6.2% in the stress conditions | These conditions tighten the drawdown limit, because forced flow almost disappears otherwise |
 
-Removing price impact cuts GRU PR-AUC from 0.95 to 0.26, so the observer depends on the price footprint of agent flow. Disabling forced deleveraging barely changes it (0.95), so the default label does not track liquidations closely. The GRU's PR-AUC of 0.96 at ρ = 0 is also higher than the roughly 0.80 from round 3, and that gap has not been explained.
+Removing price impact cuts GRU PR-AUC from 0.95 to 0.26, so the observer depends on the price footprint of agent flow. Disabling forced deleveraging barely changes it (0.95), so the default label does not track liquidations closely.
 
-Full tables are in [docs/reports/experiment_zero_round3.md](docs/reports/experiment_zero_round3.md), [docs/reports/experiment_zero_round4.md](docs/reports/experiment_zero_round4.md) and [docs/reports/overlap_sweep.md](docs/reports/overlap_sweep.md).
+The agent population matters more than the seeds. Swapping seeds moves GRU PR-AUC by at most 0.03, while swapping the population moves it by 0.17 to 0.19 (about 0.78 for momentum, linear and MLP agents against about 0.96 for the five-family mix). Every number above belongs to one selected market setting.
+
+Full tables are in [docs/reports/experiment_zero_round3.md](docs/reports/experiment_zero_round3.md), [docs/reports/experiment_zero_round5.md](docs/reports/experiment_zero_round5.md), [docs/reports/round5_reconcile.md](docs/reports/round5_reconcile.md) and [docs/reports/overlap_sweep_stress.md](docs/reports/overlap_sweep_stress.md).
 
 ## Next steps
 
-1. Separate noise from information: add a control with signal noise but no information, sweep the signal scale β, and reconcile the ρ = 0 score with round 3.
-2. Find a label and setting where forced flow occurs alongside private signals, since forced flow almost disappears at ρ > 0.
-3. Test on real data. Binance perpetual futures come first, because liquidation data gives a partly observable label for forced flow.
+1. Work out why higher overlap reduces forced selling here, including whether agents in step avoid the drawdowns that trigger it.
+2. Find which agent families make crowding visible, since population has the largest effect measured so far.
+3. Size the signal relative to each family's own forecast. A single β perturbs momentum and reversion agents far more than learned agents.
+4. Test on real data. Binance perpetual futures come first, because liquidation data gives a partly observable label for forced flow.
 
 ## Concepts behind the project
 
