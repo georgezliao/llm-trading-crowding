@@ -79,6 +79,8 @@ class PrivateRecord:
     signals: FloatArray | None = None
     base_forecasts: FloatArray | None = None
     signal_terms: FloatArray | None = None
+    drawdown_breaches: BoolArray | None = None
+    liquidating: BoolArray | None = None
 
     def __post_init__(self) -> None:
         state_arrays = (self.positions, self.cash, self.equity)
@@ -132,6 +134,11 @@ class PrivateRecord:
                 _validate_float_arrays((values,), ndim=2, label=name)
                 if values.shape != (n_steps, n_agents):
                     raise ValueError(f"{name} must have shape (steps, agents)")
+        for name in ("drawdown_breaches", "liquidating"):
+            values = getattr(self, name)
+            if values is not None and (np.asarray(values).dtype != np.bool_
+                                       or np.asarray(values).shape != (n_steps, n_agents)):
+                raise ValueError(f"{name} must be boolean with shape (steps, agents)")
         if self.signals is None:
             object.__setattr__(
                 self, "signals", np.zeros((n_steps, n_agents), dtype=np.float64)
@@ -207,6 +214,8 @@ def split_simulation_records(
             None if result.base_forecasts is None else result.base_forecasts.copy()
         ),
         signal_terms=result.signal_terms.copy(),
+        drawdown_breaches=result.drawdown_breaches.copy(),
+        liquidating=result.liquidating.copy(),
     )
     return public, private
 

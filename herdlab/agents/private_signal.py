@@ -25,6 +25,7 @@ class PrivateSignalConfig:
     beta: float
     rng_stream: int
     mode: str = "signal"
+    noise_sharing: float | None = None
 
     @property
     def enabled(self) -> bool:
@@ -41,6 +42,11 @@ def private_signal_config(config: Mapping[str, Any]) -> PrivateSignalConfig:
     if not isinstance(raw, Mapping):
         raise TypeError("agents.private_signal must be a mapping")
 
+    sharing = raw.get("noise_sharing")
+    if sharing is not None:
+        sharing = float(sharing)
+        if not np.isfinite(sharing) or not 0.0 <= sharing <= 1.0:
+            raise ValueError("agents.private_signal.noise_sharing must be finite and in [0, 1]")
     strength = float(raw.get("strength", 0.0))
     mode = raw.get("mode", "signal")
     if mode not in ("off", "signal", "noise_only"):
@@ -62,7 +68,7 @@ def private_signal_config(config: Mapping[str, Any]) -> PrivateSignalConfig:
             "agents.private_signal.rng_stream must be at least 2 to remain "
             "separate from exogenous and population streams"
         )
-    return PrivateSignalConfig(strength=strength, beta=beta, rng_stream=rng_stream, mode=mode)
+    return PrivateSignalConfig(strength=strength, beta=beta, rng_stream=rng_stream, mode=mode, noise_sharing=sharing)
 
 
 def generate_private_signals(
@@ -96,12 +102,13 @@ def generate_private_signals(
         return np.zeros((n_steps, agent_count), dtype=np.float64)
 
     mode = learned_overlap_mode(config)
-    if mode == "none":
+    if mode == "none" and settings.noise_sharing is None:
         # Preserve the round-3/R4-1 signal draw exactly in the default mode.
         noise = rng.normal(0.0, 1.0, size=(n_steps, agent_count))
     else:
         agents = config["agents"] if "agents" in config else config
-        overlap = float(agents["feature_overlap"])
+        overlap = (float(agents["feature_overlap"]) if settings.noise_sharing is None
+                   else settings.noise_sharing)
         if not np.isfinite(overlap) or not 0.0 <= overlap <= 1.0:
             raise ValueError("agents.feature_overlap must be finite and in [0, 1]")
         common = rng.normal(0.0, 1.0, size=n_steps)

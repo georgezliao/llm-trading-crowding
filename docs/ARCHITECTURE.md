@@ -211,3 +211,43 @@ positives. Otherwise it returns “forced selling was not tested adequately.”
 Forced-order fraction includes forced buys and sells; event counts include only
 forced selling. No simulator equation or existing target definition changes,
 and none of these private diagnostics enter observer inputs.
+
+## Round-6 mechanism diagnostics (R6-3)
+
+`agents.private_signal.noise_sharing` optionally sets ν in [0,1], independently
+of `agents.feature_overlap` (lag-weight ω). Explicit ν uses
+ε_i,t = sqrt(ν) ε_common,t + sqrt(1−ν) ε_idio,i,t in either learned-overlap mode.
+When omitted, `none` retains its original single idiosyncratic draw, and
+`lag_weights` retains ν=ω and the original common-then-idiosyncratic draw order.
+The forecast equation and signal stream are unchanged. Full 500-step round-5
+stress hashes captured before this change cover all five ω values at seed 7000.
+
+Two optional private boolean (steps, agents) arrays log risk behavior:
+`drawdown_breaches` marks a new liquidation schedule whose triggering decision
+exceeds the drawdown limit, including coincident leverage breaches;
+`liquidating` marks an active schedule decision, including zero positions but
+excluding cooldown. Logging reads the existing decision computation without
+extra risk updates. Legacy records may omit these fields. Neither field enters
+public records, public observations, or observer features.
+
+The mechanism runner reduces these logs and existing private equity paths to
+breach counts, fraction of agents ever breaching, maximum simultaneous active
+liquidations, mean per-agent all-time maximum equity drawdown (including initial
+and terminal states, without cooldown peak resets), terminal P&L population
+standard deviation across agents (currency units), mean terminal simple equity
+return, forced-order fraction, and forced-selling window counts/rates. These
+operational definitions are fixed before running and flagged for lead review
+because the registration does not specify all aggregation conventions.
+
+`round6_mechanism.py` runs five coupled ω levels and four factorial cells,
+reusing the two diagonal endpoints (210 unique episodes, seeds 7000–7029).
+The forced-flow threshold is the registered existing zero, with horizon 10;
+there is no new threshold fitting. OLS slopes and high-minus-low factorial
+main effects use 10,000 joint-seed episode bootstrap resamples. Forced direction
+uses strict CI signs; M1/M2 require negative slopes and M3 a positive slope.
+These mechanism associations are not causal. A factorial setting drives the
+decline only when its main-effect CI is strictly negative, a causal attribution
+limited to this simulator. Sparse-window and 1% base-rate flags are displayed
+separately from the explicitly registered continuous-outcome rules. There is no
+observer fit or replication comparison in this diagnostic. Per-condition caches
+store only private episode summaries, configs, source fingerprints, and timings.

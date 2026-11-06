@@ -82,6 +82,8 @@ class RiskManager:
             self._peak_equity: float | None = float(initial_peak_equity)
         else:
             self._peak_equity = None
+        self.last_drawdown_breach = False
+        self.last_liquidating = False
         self.limits = limits
         self._liquidation_steps_remaining = 0
         self._cooldown_steps_remaining = 0
@@ -141,6 +143,8 @@ class RiskManager:
     ) -> OrderDecision:
         """Return the strategy order or a forced order that overrides it."""
 
+        self.last_drawdown_breach = False
+        self.last_liquidating = False
         _require_finite("strategy_order", strategy_order)
         _require_finite("position", position)
 
@@ -171,9 +175,11 @@ class RiskManager:
         )
 
         if breached and self._liquidation_steps_remaining == 0:
+            self.last_drawdown_breach = current_drawdown > self.limits.max_drawdown
             self._liquidation_steps_remaining = self.limits.liquidation_steps
 
         if breached or self._liquidation_steps_remaining > 0:
+            self.last_liquidating = True
             remaining = max(self._liquidation_steps_remaining, 1)
             quantity = -float(position) / remaining
             if self._liquidation_steps_remaining > 0:

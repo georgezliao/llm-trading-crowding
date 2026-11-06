@@ -59,6 +59,8 @@ class SimulationResult:
     signals: FloatArray
     base_forecasts: FloatArray | None
     signal_terms: FloatArray
+    drawdown_breaches: BoolArray
+    liquidating: BoolArray
 
 
 class MarketSimulator:
@@ -122,6 +124,8 @@ class MarketSimulator:
         volume = np.empty(n_steps, dtype=np.float64)
         orders = np.empty((n_steps, n_agents), dtype=np.float64)
         forced = np.empty((n_steps, n_agents), dtype=np.bool_)
+        drawdown_breaches = np.zeros((n_steps, n_agents), dtype=np.bool_)
+        liquidating = np.zeros((n_steps, n_agents), dtype=np.bool_)
         costs = np.empty((n_steps, n_agents), dtype=np.float64)
         positions = np.empty((n_steps + 1, n_agents), dtype=np.float64)
         cash = np.empty((n_steps + 1, n_agents), dtype=np.float64)
@@ -185,6 +189,8 @@ class MarketSimulator:
                     )
                     orders[step, index] = decision.quantity
                     forced[step, index] = decision.forced
+                    drawdown_breaches[step, index] = risk_manager.last_drawdown_breach
+                    liquidating[step, index] = risk_manager.last_liquidating
 
             fill_prices[step] = prices[step]
             costs[step] = self.cost_rate * np.abs(orders[step]) * fill_prices[step]
@@ -234,6 +240,8 @@ class MarketSimulator:
                 base_forecasts if np.all(np.isfinite(base_forecasts)) else None
             ),
             signal_terms=signal_terms,
+            drawdown_breaches=drawdown_breaches,
+            liquidating=liquidating,
         )
 
     def run_records(
