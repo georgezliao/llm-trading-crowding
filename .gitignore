@@ -22,3 +22,5 @@ docs/reports/*
 
 !docs/reports/experiment_zero_round5.md
 !docs/reports/overlap_sweep_stress.md
+
+!docs/reports/round6_population.md
