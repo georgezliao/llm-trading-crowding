@@ -51,7 +51,7 @@ Equations and design choices are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 Removing price impact cuts GRU PR-AUC from 0.95 to 0.26, so the observer depends on the price footprint of agent flow. Disabling forced deleveraging barely changes it (0.95), so the default label does not track liquidations closely.
 
-The agent population matters more than the seeds. Swapping seeds moves GRU PR-AUC by at most 0.03, while swapping the population moves it by 0.17 to 0.19 (about 0.78 for momentum, linear and MLP agents against about 0.96 for the five-family mix). Every number above belongs to one selected market setting.
+The agent population matters more than the seeds. Swapping seeds moves GRU PR-AUC by at most 0.035, while swapping the population moves it by 0.16 to 0.19 (about 0.78 for momentum, linear and MLP agents against about 0.96 for the five-family mix). Every number above belongs to one selected market setting.
 
 Full tables are in [docs/reports/experiment_zero_round3.md](docs/reports/experiment_zero_round3.md), [docs/reports/experiment_zero_round5.md](docs/reports/experiment_zero_round5.md), [docs/reports/round5_reconcile.md](docs/reports/round5_reconcile.md) and [docs/reports/overlap_sweep_stress.md](docs/reports/overlap_sweep_stress.md).
 
