@@ -18,18 +18,18 @@ python -m venv .venv
 .venv/bin/pytest -q
 ```
 
-Run the latest experiments. Each writes its report to `docs/reports/`. The grid took about 100 minutes of compute on 10 CPU cores, and finished conditions are cached under `runs/round5_cache/`:
+Run the latest experiments. Each writes its report to `docs/reports/`. On 10 CPU cores the population run took about 26 minutes, the mechanism sweep 2 minutes and the scaled-signal grid about 125 minutes. Finished conditions are cached under `runs/`:
 
 ```bash
-.venv/bin/python -m herdlab.experiments.round5_reconcile
+.venv/bin/python -m herdlab.experiments.round6_population
 ```
 
 ```bash
-.venv/bin/python -m herdlab.experiments.experiment_zero_round5
+.venv/bin/python -m herdlab.experiments.round6_mechanism --workers 10
 ```
 
 ```bash
-.venv/bin/python -m herdlab.experiments.overlap_sweep_stress
+.venv/bin/python -m herdlab.experiments.round6_scaled_grid
 ```
 
 ## How it works
@@ -45,21 +45,23 @@ Equations and design choices are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 | Question | Result | Main caveat |
 |---|---|---|
 | Does the GRU generalize to an agent architecture it never trained on? (round 3) | PR-AUC 0.66 [0.41, 0.79] against 0.04 for the trivial reference, at a 1.5% base rate | LightGBM reaches 0.60, and agents saw only public prices |
-| Does private information make inference harder? (rounds 4 and 5) | Often, once noise is controlled for. At β = 0.25, GRU PR-AUC is 0.68 with noise only and 0.30 at ρ = 0.5, a gain change of −0.38 [−0.49, −0.22] | At β = 1 the direction flips and information makes inference easier. Noise alone also degrades inference at every tested β, so the round-4 result mixed the two effects |
+| Does private information make inference harder? (rounds 4 to 6) | It depends on signal size. With signals scaled to each family's forecast (round 6), information makes inference harder at β = 0.5 (gain change −0.26 [−0.35, −0.13] at ρ = 0.5), easier at β = 1 (+0.09 [+0.07, +0.12]), and has no established direction at β = 0.25 | The large round-5 effect at β = 0.25 (−0.38) shrank to −0.07 [−0.22, +0.07] once scaling was fixed. At β = 1 the scaling itself fails, because learned agents' forecasts shrink. Noise alone degrades inference at every β |
 | Does shared agent input raise crowding? (H1, rounds 4 and 5) | Yes: mean position alignment rises from 0.25 to 0.83 and the event rate from 0.03% to 14% as overlap goes from 0 to 1 | Forced selling doesn't follow. Under a 5% drawdown limit, forced-flow windows fall from 2,841 to 14 as overlap rises |
+| Why does forced selling fall as overlap rises? (round 6) | Overlap had two parts, shared lag weights and shared signal noise. Sharing the noise causes the drop (effect on forced-order fraction −0.0050 [−0.0057, −0.0045]); lag overlap has no established effect | With independent noise, forced sellers are mostly agents whose noise happened to lose. This doesn't show that crowding protects agents |
+| Which agents make crowding visible? (round 6) | Removing momentum agents lowers GRU PR-AUC from 0.96 to 0.73, reversion to 0.80 and MLP to 0.90. Removing linear or GBDT agents has no established effect | One market setting, and no run removes reversion alone from the low-scoring momentum/linear/MLP mix |
 | Can the observer predict forced selling? (round 5) | Weakly: GRU PR-AUC is 0.09–0.18 at base rates of 1.6–6.2% in the stress conditions | These conditions tighten the drawdown limit, because forced flow almost disappears otherwise |
 
 Removing price impact cuts GRU PR-AUC from 0.95 to 0.26, so the observer depends on the price footprint of agent flow. Disabling forced deleveraging barely changes it (0.95), so the default label does not track liquidations closely.
 
-The agent population matters more than the seeds. Swapping seeds moves GRU PR-AUC by at most 0.035, while swapping the population moves it by 0.16 to 0.19 (about 0.78 for momentum, linear and MLP agents against about 0.96 for the five-family mix). Every number above belongs to one selected market setting.
+The agent population matters more than the seeds. Swapping seeds moves GRU PR-AUC by at most 0.035, while swapping the population moves it by 0.16 to 0.19 (about 0.78 for momentum, linear and MLP agents against about 0.96 for the five-family mix). Round 6 points to the missing reversion agents as the likely cause. Every number above belongs to one selected market setting.
 
-Full tables are in [docs/reports/experiment_zero_round3.md](docs/reports/experiment_zero_round3.md), [docs/reports/experiment_zero_round5.md](docs/reports/experiment_zero_round5.md), [docs/reports/round5_reconcile.md](docs/reports/round5_reconcile.md) and [docs/reports/overlap_sweep_stress.md](docs/reports/overlap_sweep_stress.md).
+Full tables are in [docs/reports/experiment_zero_round3.md](docs/reports/experiment_zero_round3.md), [docs/reports/experiment_zero_round5.md](docs/reports/experiment_zero_round5.md), [docs/reports/round5_reconcile.md](docs/reports/round5_reconcile.md), [docs/reports/overlap_sweep_stress.md](docs/reports/overlap_sweep_stress.md), [docs/reports/round6_population.md](docs/reports/round6_population.md), [docs/reports/round6_mechanism.md](docs/reports/round6_mechanism.md) and [docs/reports/round6_scaled_grid.md](docs/reports/round6_scaled_grid.md).
 
 ## Next steps
 
-1. Work out why higher overlap reduces forced selling here, including whether agents in step avoid the drawdowns that trigger it.
-2. Find which agent families make crowding visible, since population has the largest effect measured so far.
-3. Size the signal relative to each family's own forecast. A single β perturbs momentum and reversion agents far more than learned agents.
+1. Test crowding with a shared strategy and independent noise, since shared noise is what removed forced selling in round 6.
+2. Remove reversion agents alone from the momentum/linear/MLP mix to confirm what drives the population gap.
+3. Work out why learned agents' forecasts shrink under strong private signals, which breaks the per-family scaling at β = 1.
 4. Test on real data. Binance perpetual futures come first, because liquidation data gives a partly observable label for forced flow.
 
 ## Concepts behind the project
