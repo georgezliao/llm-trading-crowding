@@ -24,7 +24,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from herdlab.agents.base import Agent, PublicObservation
-from herdlab.agents.private_signal import private_signal_config
+from herdlab.agents.private_signal import family_scale_vector, private_signal_config
 from herdlab.agents.risk import RiskLimits, RiskManager
 from herdlab.market.exogenous import ExogenousPath
 from herdlab.market.impact import ImpactFunction, LinearImpact, SignedPowerImpact
@@ -115,6 +115,7 @@ class MarketSimulator:
             n_steps=n_steps,
             n_agents=n_agents,
         )
+        family_scales = family_scale_vector(self.private_signal, self.agents)
         base_forecasts = np.full((n_steps, n_agents), np.nan)
         signal_terms = np.zeros((n_steps, n_agents), dtype=np.float64)
         prices = np.empty(n_steps + 1, dtype=np.float64)
@@ -168,7 +169,11 @@ class MarketSimulator:
                 else:
                     adjustment = (
                         self.private_signal.beta
-                        * realized_volatility
+                        * (
+                            realized_volatility
+                            if family_scales is None
+                            else family_scales[index]
+                        )
                         * signals[step, index]
                     )
                     signal_terms[step, index] = adjustment

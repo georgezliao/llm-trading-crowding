@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,6 +16,14 @@ if TYPE_CHECKING:
 
 FloatArray = NDArray[np.float64]
 
+AGENT_FAMILIES = {
+    "MomentumAgent": "momentum",
+    "MeanReversionAgent": "reversion",
+    "LinearMLAgent": "linear",
+    "LightGBMAgent": "gbdt",
+    "MLPAgent": "mlp",
+}
+
 
 @dataclass(frozen=True)
 class PrivateSignalConfig:
@@ -26,6 +34,8 @@ class PrivateSignalConfig:
     rng_stream: int
     mode: str = "signal"
     noise_sharing: float | None = None
+    scale: str = "sigma"
+    family_scales: Mapping[str, float] | None = None
 
     @property
     def enabled(self) -> bool:
@@ -68,7 +78,33 @@ def private_signal_config(config: Mapping[str, Any]) -> PrivateSignalConfig:
             "agents.private_signal.rng_stream must be at least 2 to remain "
             "separate from exogenous and population streams"
         )
-    return PrivateSignalConfig(strength=strength, beta=beta, rng_stream=rng_stream, mode=mode, noise_sharing=sharing)
+    scale = raw.get("scale", "sigma")
+    if scale not in ("sigma", "family"):
+        raise ValueError("agents.private_signal.scale must be sigma or family")
+    family_scales = raw.get("family_scales")
+    if scale == "family":
+        if not isinstance(family_scales, Mapping):
+            raise ValueError("family signal scaling requires agents.private_signal.family_scales")
+        family_scales = {family: float(value) for family, value in family_scales.items()}
+        if not all(np.isfinite(value) and value > 0.0 for value in family_scales.values()):
+            raise ValueError("agents.private_signal.family_scales must be finite and positive")
+    else:
+        family_scales = None
+    return PrivateSignalConfig(strength=strength, beta=beta, rng_stream=rng_stream, scale=scale, family_scales=family_scales, mode=mode, noise_sharing=sharing)
+
+
+def family_scale_vector(
+    settings: PrivateSignalConfig, agents: Sequence[Any]
+) -> FloatArray | None:
+    """Return each agent's fixed family scale, or None for the sigma-scaled term."""
+
+    if settings.scale == "sigma":
+        return None
+    assert settings.family_scales is not None
+    return np.array(
+        [settings.family_scales[AGENT_FAMILIES[type(agent).__name__]] for agent in agents],
+        dtype=np.float64,
+    )
 
 
 def generate_private_signals(
@@ -145,7 +181,9 @@ def generate_private_signals(
 
 
 __all__ = [
+    "AGENT_FAMILIES",
     "PrivateSignalConfig",
+    "family_scale_vector",
     "generate_private_signals",
     "private_signal_config",
 ]

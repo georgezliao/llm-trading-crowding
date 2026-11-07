@@ -65,6 +65,8 @@ and, in predictive mode only, uses the exogenous innovation entering r_{t+1},
 making this deliberately private predictive information rather than a public
 causal feature.
 
+`agents.private_signal.scale` selects the size of the signal term. `sigma` (default) gives β σ̂_t s, which perturbs momentum and reversion agents far more than learned agents because their base forecasts are smaller. `family` gives β c_f s, where `family_scales` holds a fixed constant c_f per family, set to the pooled standard deviation of that family's base forecast in the off condition on training seeds only, so β is close to the intended signal-to-forecast ratio for every family.
+
 Signals are serialized only in `PrivateRecord`, alongside per-agent positions,
 orders, risk state, and labels. Round 5 also records `base_forecasts` (r̂) and
 `signal_terms` (β σ̂ s), each shaped (steps, agents), at decision time before
